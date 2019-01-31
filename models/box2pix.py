@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,8 +18,7 @@ def box2pix(num_classes=20, pretrained=False):
 
 class Box2Pix(nn.Module):
     """
-        Implementation of
-        Box2Pix: Single-Shot Instance Segmentation by Assigning Pixels to Object Boxes
+        Implementation of Box2Pix: Single-Shot Instance Segmentation by Assigning Pixels to Object Boxes
             <https://lmb.informatik.uni-freiburg.de/Publications/2018/UB18>
     """
 
@@ -50,26 +47,33 @@ class Box2Pix(nn.Module):
         self.inception5a = Inception(832, 256, 160, 320, 32, 128, 128)
         self.inception5b = Inception(832, 384, 192, 384, 48, 128, 128)
 
-        self.maxpool5 = nn.MaxPool2d(3, stride=2, ceil_mode=True)  # padding=1)
-        self.inception6a = Inception(1024, 256, 160, 320, 64, 128, 128)
+        self.maxpool5 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
+        self.inception6a = Inception(1024, 256, 160, 320, 32, 128, 128)
         self.inception6b = Inception(832, 384, 192, 384, 48, 128, 128)
 
-        self.maxpool6 = nn.MaxPool2d(3, stride=2, ceil_mode=True)  # padding=1)
+        self.maxpool6 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
         self.inception7a = Inception(1024, 256, 160, 320, 32, 128, 128)
         self.inception7b = Inception(832, 384, 192, 384, 48, 128, 128)
 
-        self.offs_score7b = nn.Conv2d(1024, 2, kernel_size=1)
-        self.offs_upscore2 = nn.ConvTranspose2d(2, 2, kernel_size=4, stride=2, bias=False)
-        self.offs_score6b = nn.Conv2d(1024, 2, kernel_size=1)
-        self.offs_upscore16 = nn.ConvTranspose2d(2, 2, kernel_size=32, stride=16, bias=False)
-
-        self.sem_score7b = nn.Conv2d(1024, num_classes, kernel_size=1)
-        self.sem_upscore2 = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=4, stride=2, bias=False)
+        self.sem_score3b = nn.Conv2d(480, num_classes, kernel_size=1)
+        self.sem_score4e = nn.Conv2d(832, num_classes, kernel_size=1)
+        self.sem_score5b = nn.Conv2d(1024, num_classes, kernel_size=1)
         self.sem_score6b = nn.Conv2d(1024, num_classes, kernel_size=1)
-        self.sem_upscore16 = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=32, stride=16, bias=False)
+        self.sem_upscore = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=4, stride=2, bias=False)
+        self.sem_upscore2 = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=4, stride=2, bias=False)
+        self.sem_upscore4 = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=4, stride=2, bias=False)
+        self.sem_upscore8 = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=16, stride=8, bias=False)
+
+        self.offs_score3b = nn.Conv2d(480, 2, kernel_size=1)
+        self.offs_score4e = nn.Conv2d(832, 2, kernel_size=1)
+        self.offs_score5b = nn.Conv2d(1024, 2, kernel_size=1)
+        self.offs_score6b = nn.Conv2d(1024, 2, kernel_size=1)
+        self.offs_upscore = nn.ConvTranspose2d(2, 2, kernel_size=4, stride=2, bias=False)
+        self.offs_upscore2 = nn.ConvTranspose2d(2, 2, kernel_size=4, stride=2, bias=False)
+        self.offs_upscore4 = nn.ConvTranspose2d(2, 2, kernel_size=4, stride=2, bias=False)
+        self.offs_upscore8 = nn.ConvTranspose2d(2, 2, kernel_size=16, stride=8, bias=False)
 
         self.multibox = MultiBox(num_classes)
-
         self._initialize_weights()
 
     def _initialize_weights(self):
@@ -79,16 +83,22 @@ class Box2Pix(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.2)
             elif isinstance(m, nn.ConvTranspose2d):
-                upsampling_weight = get_upsampling_weight(m.in_channels, m.out_channels, m.kernel_size[0])
+                upsampling_weight = get_upsampling_weight(m.out_channels, m.kernel_size[0])
                 m.weight.data.copy_(upsampling_weight)
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def copy_weights(self, googlenet):
-        for name, m in googlenet.named_modules():
-            if hasattr(self, name):
-                setattr(self, name, m)
+    def init_from_googlenet(self):
+        googlenet = nn.Module()  # torchvision.models.googlenet(pretrained=True)
+        self.load_state_dict(googlenet.state_dict(), strict=False)
+
+        for l1, l2 in zip([self.inception6b.modules(), self.inception7b.modules()],
+                          [googlenet.inception5b.modules(), googlenet.inception5b.modules()]):
+            if isinstance(l1, nn.Conv2d):
+                l1.weight.data.copy_(l2.weight.data)
+                if l1.bias is not None:
+                    l1.bias.data.copy_(l2.bias.data)
 
     def forward(self, x):
         feature_maps = []
@@ -102,9 +112,8 @@ class Box2Pix(nn.Module):
         x = self.lrn2(x)
         x = self.maxpool2(x)
         x = self.inception3a(x)
-        x = self.inception3b(x)
-
-        x = self.maxpool3(x)
+        inception3b = self.inception3b(x)
+        x = self.maxpool3(inception3b)
         x = self.inception4a(x)
         x = self.inception4b(x)
         x = self.inception4c(x)
@@ -127,43 +136,41 @@ class Box2Pix(nn.Module):
         inception7b = self.inception7b(x)
         feature_maps.append(inception7b)
 
-        for f in feature_maps:
-            print(f.size())
-
         loc_preds, conf_preds = self.multibox(feature_maps)
 
-        # TODO: use learnable upsampling
-        sem_score7b = self.sem_score7b(inception7b)
         sem_score6b = self.sem_score6b(inception6b)
-        score = F.interpolate(sem_score7b, sem_score6b.size()[2:], mode='bilinear', align_corners=True)
-        score += sem_score6b
-        semantic = F.interpolate(score, size[2:], mode='bilinear', align_corners=True)
+        sem_score5b = self.sem_score5b(inception5b)
+        semantics = self.sem_upscore(sem_score6b)
+        semantics = semantics[:, :, 1:1 + sem_score5b.size()[2], 1:1 + sem_score5b.size()[3]]
+        semantics += sem_score5b
+        sem_score4e = self.sem_score4e(inception4e)
+        semantics = self.sem_upscore2(semantics)
+        semantics = semantics[:, :, 1:1 + sem_score4e.size()[2], 1:1 + sem_score4e.size()[3]]
+        semantics += sem_score4e
+        sem_score3b = self.sem_score3b(inception3b)
+        semantics = self.sem_upscore4(semantics)
+        semantics = semantics[:, :, 1:1 + sem_score3b.size()[2], 1:1 + sem_score3b.size()[3]]
+        semantics += sem_score3b
+        semantics = self.sem_upscore8(semantics)
+        semantics = semantics[:, :, 4:4 + size[2], 4:4 + size[3]].contiguous()
 
-        offs_score7b = self.offs_score7b(inception7b)
         offs_score6b = self.offs_score6b(inception6b)
-        score = F.interpolate(offs_score7b, offs_score6b.size()[2:], mode='bilinear', align_corners=True)
-        score += offs_score6b
-        offsets = F.interpolate(score, size[2:], mode='bilinear', align_corners=True)
+        offs_score5b = self.offs_score5b(inception5b)
+        offsets = self.offs_upscore(offs_score6b)
+        offsets = offsets[:, :, 1:1 + offs_score5b.size()[2], 1:1 + offs_score5b.size()[3]]
+        offsets += offs_score5b
+        offs_score4e = self.offs_score4e(inception4e)
+        offsets = self.offs_upscore2(offsets)
+        offsets = offsets[:, :, 1:1 + offs_score4e.size()[2], 1:1 + offs_score4e.size()[3]]
+        offsets += offs_score4e
+        offs_score3b = self.offs_score3b(inception3b)
+        offsets = self.offs_upscore4(offsets)
+        offsets = offsets[:, :, 1:1 + offs_score3b.size()[2], 1:1 + offs_score3b.size()[3]]
+        offsets += offs_score3b
+        offsets = self.offs_upscore8(offsets)
+        offsets = offsets[:, :, 4:4 + size[2], 4:4 + size[3]].contiguous()
 
-        """
-        sem_score7b = self.sem_score7b(inception7b)
-        sem_upscore2 = self.sem_upscore2(sem_score7b)
-        sem_score6b = self.sem_score6b(inception6b)
-        sem_score6b_crop = sem_score6b[:, :, 5:5 + sem_upscore2.size()[2], 5:5 + sem_upscore2.size()[3]]
-        sem_upscore2 += sem_score6b_crop
-        semantic = self.sem_upscore16(sem_upscore2)
-        semantic = semantic[:, :, 27:27 + size[2], 27:27 + size[3]].contiguous()
-
-        offs_score7b = self.offs_score7b(inception7b)
-        offs_upscore2 = self.offs_upscore2(offs_score7b)
-        offs_score6b = self.offs_score6b(inception6b)
-        offs_score6b_crop = offs_score6b[:, :, 5:5 + offs_upscore2.size()[2], 5:5 + offs_upscore2.size()[3]]
-        offs_upscore2 += offs_score6b_crop
-        offsets = self.sem_upscore16(offs_upscore2)
-        offsets = offsets[:, :, 27:27 + size[2], 27:27 + size[3]].contiguous()
-        """
-
-        return loc_preds, conf_preds, semantic, offsets
+        return loc_preds, conf_preds, semantics, offsets
 
 
 class Inception(nn.Module):
@@ -210,10 +217,10 @@ class BasicConv2d(nn.Module):
 
 
 if __name__ == '__main__':
-    num_classes, width, height = 20, 512, 1024
+    num_classes, width, height = 20, 1024, 2048
 
-    model = Box2Pix(num_classes)#.to('cuda')
-    inp = torch.randn(1, 3, height, width)#.to('cuda')
+    model = Box2Pix(num_classes)  # .to('cuda')
+    inp = torch.randn(1, 3, height, width)  # .to('cuda')
 
     loc, conf, sem, offs = model(inp)
 
