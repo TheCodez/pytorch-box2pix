@@ -15,8 +15,8 @@ class MultiBox(nn.Module):
         in_channels = [832, 1024, 1024, 1024]
 
         for i in range(len(in_channels)):
-            self.loc_layers.append(nn.Conv2d(in_channels[i], num_defaults[i] * 4, kernel_size=1, padding=1))
-            self.conf_layers.append(nn.Conv2d(in_channels[i], num_defaults[i] * num_classes, kernel_size=1, padding=1))
+            self.loc_layers.append(nn.Conv2d(in_channels[i], num_defaults[i] * 4, kernel_size=1))
+            self.conf_layers.append(nn.Conv2d(in_channels[i], num_defaults[i] * num_classes, kernel_size=1))
 
     def forward(self, input):
         loc_preds = []
@@ -27,14 +27,12 @@ class MultiBox(nn.Module):
             # (N x C x H x W) -> (N x H x W x C)
             loc = loc.permute(0, 2, 3, 1).contiguous()
             loc = loc.view(loc.size(0), -1, 4)
-            print('Loc:', loc.size())
             loc_preds.append(loc)
 
             conf = self.conf_layers[i](layer)
             # (N x C x H x W) -> (N x H x W x C)
             conf = conf.permute(0, 2, 3, 1).contiguous()
             conf = conf.view(conf.size(0), -1, self.num_classes)
-            print('Conf:', conf.size())
             conf_preds.append(conf)
 
         loc_preds = torch.cat(loc_preds, 1)
