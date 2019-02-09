@@ -12,7 +12,7 @@ class FocalLoss(nn.Module):
 
     Args:
         gamma (int, optional): Gamma smoothly adjusts the rate at which easy examples
-            are downweighted. If gamme is equals 0 it's the same as cross entropy loss. Default: 1
+            are down weighted. If gamma is equals 0 it's the same as cross entropy loss. Default: 1
         reduction (string, optional): Specifies the reduction to apply to the output:
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the sum of the output will be divided by the number of
@@ -29,7 +29,7 @@ class FocalLoss(nn.Module):
         log_pt = -F.cross_entropy(input, target, reduction='none')
         pt = torch.exp(log_pt)
 
-        loss = -((1 - pt) ** self.gamma) * log_pt
+        loss = -torch.pow(1 - pt, self.gamma) * log_pt
 
         if self.reduction == 'mean':
             return loss.mean()
