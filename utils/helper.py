@@ -19,3 +19,7 @@ def get_upsampling_weight(channels, kernel_size):
     weight[range(channels), range(channels), :, :] = filt
 
     return weight
+
+
+def assign_pix2box(semantics, offsets, boxes, labels):
+    return semantics

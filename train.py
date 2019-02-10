@@ -1,85 +1,128 @@
+import os
 import warnings
 from argparse import ArgumentParser
+from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-from ignite.utils import convert_tensor
 from ignite.contrib.handlers import ProgressBar
-from ignite.engine import Events, Engine, create_supervised_evaluator
+from ignite.engine import Events, Engine
 from ignite.handlers import ModelCheckpoint, Timer
-from ignite.metrics import Accuracy, Loss, RunningAverage
+from ignite.metrics import RunningAverage, Loss
+from ignite.utils import convert_tensor
+from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
-from torchvision import transforms
+from torchvision.transforms import Normalize
 
+import models
 from datasets.cityscapes import CityscapesDataset
-from datasets.transforms.transforms import Resize, Compose, RandomHorizontalFlip, ToTensor
-from loss.box2pixloss import box2pix_loss, Box2PixLoss
-from loss.multiboxloss import MultiBoxLoss
-from models.box2pix import Box2Pix
+from datasets.transforms import transforms
+from datasets.transforms.transforms import ToTensor
+from loss.boxloss import BoxLoss
+from loss.multitaskloss import MultiTaskLoss
+from metrics.iou import IntersectionOverUnion
+from metrics.mean_ap import MeanAveragePrecision
+from utils import helper
+from utils.box_coder import BoxCoder
 
 
-def get_data_loaders(train_batch_size, val_batch_size):
-    new_size = (512, 1024)  # (1024, 2048)
+def create_summary_writer(model, data_loader, log_dir):
+    writer = SummaryWriter(log_dir=log_dir)
+    data_loader_iter = iter(data_loader)
+    x, instance, boxes, labels = next(data_loader_iter)
+    try:
+        writer.add_graph(model, x)
+    except Exception as e:
+        print("Failed to save model graph: {}".format(e))
+    return writer
 
-    joint_transforms = Compose([
-        Resize(new_size),
-        RandomHorizontalFlip(),
-        ToTensor()
+
+def get_data_loaders(data_dir, batch_size, num_workers):
+    # new_size = (512, 1024)  # (1024, 2048)
+
+    joint_transform = transforms.Compose([
+        # transforms.Resize(new_size),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(0.2, 0.2, 0.2),
+        transforms.RandomGaussionBlur(sigma=(0, 1.2)),
+        transforms.ToTensor()
     ])
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    normalize = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
-    train_loader = DataLoader(CityscapesDataset(root='data/cityscapes', split='train', joint_transform=joint_transforms,
+    train_loader = DataLoader(CityscapesDataset(root=data_dir, split='train', joint_transform=joint_transform,
                                                 img_transform=normalize),
-                              batch_size=train_batch_size, shuffle=True, num_workers=4, pin_memory=True)
+                              batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
 
-    val_loader = DataLoader(CityscapesDataset(root='data/cityscapes', split='val', joint_transform=ToTensor(),
+    val_loader = DataLoader(CityscapesDataset(root=data_dir, split='val', joint_transform=ToTensor(),
                                               img_transform=normalize),
-                            batch_size=val_batch_size, shuffle=False, num_workers=4, pin_memory=True)
+                            batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
     return train_loader, val_loader
 
 
-def run(train_batch_size, val_batch_size, epochs, lr, seed, output_dir):
-    train_loader, val_loader = get_data_loaders(train_batch_size, val_batch_size)
+def run(args):
+    train_loader, val_loader = get_data_loaders(args.dir, args.batch_size, args.num_workers)
 
-    if seed is not None:
-        torch.manual_seed(seed)
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    model = Box2Pix()
+
+    num_classes = CityscapesDataset.num_instance_classes() + 1
+    model = models.box2pix(num_classes=num_classes)
+    model.init_from_googlenet()
+
+    writer = create_summary_writer(model, train_loader, args.log_dir)
 
     if torch.cuda.device_count() > 1:
-        print('Using %d GPU(s)' % torch.cuda.device_count())
+        print("Using %d GPU(s)" % torch.cuda.device_count())
         model = nn.DataParallel(model)
 
     model = model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
 
     semantics_criterion = nn.CrossEntropyLoss(ignore_index=255)
     offsets_criterion = nn.MSELoss()
-    box_criterion = MultiBoxLoss()
-    multitask_criterion = Box2PixLoss()
+    box_criterion = BoxLoss(num_classes, gamma=2)
+    multitask_criterion = MultiTaskLoss().to(device)
 
-    def _prepare_batch(batch, dev=None, non_blocking=True):
-        x, instance, boxes, confs = batch
+    box_coder = BoxCoder()
+    optimizer = optim.Adam([{'params': model.parameters(), 'weight_decay': 5e-4},
+                            {'params': multitask_criterion.parameters()}], lr=args.lr)
 
-        return (convert_tensor(x, device=dev, non_blocking=non_blocking),
-                convert_tensor(instance, device=dev, non_blocking=non_blocking),
-                convert_tensor(boxes, device=dev, non_blocking=non_blocking),
-                convert_tensor(confs, device=dev, non_blocking=non_blocking))
+    if args.resume:
+        if os.path.isfile(args.resume):
+            print("Loading checkpoint '{}'".format(args.resume))
+            checkpoint = torch.load(args.resume)
+            args.start_epoch = checkpoint['epoch']
+            model.load_state_dict(checkpoint['model'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            multitask_criterion.load_state_dict(checkpoint['multitask'])
+            print("Loaded checkpoint '{}' (Epoch {})".format(args.resume, checkpoint['epoch']))
+        else:
+            print("No checkpoint found at '{}'".format(args.resume))
+
+    def _prepare_batch(batch, non_blocking=True):
+        x, instance, boxes, labels = batch
+
+        return (convert_tensor(x, device=device, non_blocking=non_blocking),
+                convert_tensor(instance, device=device, non_blocking=non_blocking),
+                convert_tensor(boxes, device=device, non_blocking=non_blocking),
+                convert_tensor(labels, device=device, non_blocking=non_blocking))
 
     def _update(engine, batch):
         model.train()
         optimizer.zero_grad()
-        x, instance, boxes, confs = _prepare_batch(batch, dev=device)
+        x, instance, boxes, labels = _prepare_batch(batch)
+        boxes, labels = box_coder.encode(boxes, labels)
 
         loc_preds, conf_preds, semantics_pred, offsets_pred = model(x)
 
         semantics_loss = semantics_criterion(semantics_pred, instance)
         offsets_loss = offsets_criterion(offsets_pred, instance)
-        box_loss, conf_loss = box_criterion(loc_preds, conf_preds, boxes, confs)
+        box_loss, conf_loss = box_criterion(loc_preds, boxes, conf_preds, labels)
 
         loss = multitask_criterion(semantics_loss, offsets_loss, box_loss, conf_loss)
 
@@ -96,96 +139,148 @@ def run(train_batch_size, val_batch_size, epochs, lr, seed, output_dir):
 
     trainer = Engine(_update)
 
-    checkpoint_handler = ModelCheckpoint(output_dir, 'checkpoint', save_interval=1, n_saved=10, require_empty=False)
+    checkpoint_handler = ModelCheckpoint(args.output_dir, 'checkpoint', save_interval=1, n_saved=10,
+                                         require_empty=False, create_dir=True, save_as_state_dict=False)
     timer = Timer(average=True)
 
     # attach running average metrics
-    monitoring_metrics = ['loss', 'loss_semantics', 'loss_offsets', 'loss_ssdbox', 'loss_ssdclass']
-    RunningAverage(alpha=0.98, output_transform=lambda x: x['loss']).attach(trainer, 'loss')
-    RunningAverage(alpha=0.98, output_transform=lambda x: x['loss_semantics']).attach(trainer, 'loss_semantics')
-    RunningAverage(alpha=0.98, output_transform=lambda x: x['loss_offsets']).attach(trainer, 'loss_offsets')
-    RunningAverage(alpha=0.98, output_transform=lambda x: x['loss_ssdbox']).attach(trainer, 'loss_ssdbox')
-    RunningAverage(alpha=0.98, output_transform=lambda x: x['loss_ssdclass']).attach(trainer, 'loss_ssdclass')
+    train_metrics = ['loss', 'loss_semantics', 'loss_offsets', 'loss_ssdbox', 'loss_ssdclass']
+    for m in train_metrics:
+        transform = partial(lambda x, metric: x[metric], metric=m)
+        RunningAverage(output_transform=transform).attach(trainer, m)
 
     # attach progress bar
-    pbar = ProgressBar()
-    pbar.attach(trainer, metric_names=monitoring_metrics)
+    pbar = ProgressBar(persist=True)
+    pbar.attach(trainer, metric_names=train_metrics)
 
-    trainer.add_event_handler(event_name=Events.EPOCH_COMPLETED, handler=checkpoint_handler, to_save={'model': model})
+    checkpoint = {'model': model.state_dict(), 'epoch': trainer.state.epoch, 'optimizer': optimizer.state_dict(),
+                  'multitask': multitask_criterion.state_dict()}
+    trainer.add_event_handler(event_name=Events.EPOCH_COMPLETED, handler=checkpoint_handler, to_save={
+        'checkpoint': checkpoint
+    })
 
     timer.attach(trainer, start=Events.EPOCH_STARTED, resume=Events.ITERATION_STARTED,
                  pause=Events.ITERATION_COMPLETED, step=Events.ITERATION_COMPLETED)
 
-    evaluator = create_supervised_evaluator(model,
-                                            metrics={'accuracy': Accuracy(),
-                                                     'loss_semantics': Loss(semantics_criterion),
-                                                     'loss_offsets': Loss(offsets_criterion),
-                                                     'loss_box': Loss(box_criterion)},
-                                            device=device)
+    def _inference(engine, batch):
+        model.eval()
+        with torch.no_grad():
+            x, instance, boxes, labels = _prepare_batch(batch)
+            loc_preds, conf_preds, semantics, offsets_pred = model(x)
+            boxes_preds, labels_preds, scores_preds = box_coder.decode(loc_preds, F.softmax(conf_preds, dim=1),
+                                                                       score_thresh=0.01)
+
+            semantics_loss = semantics_criterion(semantics, instance)
+            offsets_loss = offsets_criterion(offsets_pred, instance)
+            box_loss, conf_loss = box_criterion(loc_preds, boxes, conf_preds, labels)
+
+            semantics_pred = semantics.argmax(dim=1)
+            instances = helper.assign_pix2box(semantics_pred, offsets_pred, boxes_preds, labels_preds)
+
+        return {
+            'loss': (semantics_loss, offsets_loss, {'box_loss': box_loss, 'conf_loss': conf_loss}),
+            'objects': (boxes_preds, labels_preds, scores_preds, boxes, labels),
+            'semantics': semantics_pred,
+            'instances': instances
+        }
+
+    train_evaluator = Engine(_inference)
+    Loss(multitask_criterion, output_transform=lambda x: x['loss']).attach(train_evaluator, 'loss')
+    MeanAveragePrecision(num_classes, output_transform=lambda x: x['objects']).attach(train_evaluator, 'objects')
+    IntersectionOverUnion(num_classes, output_transform=lambda x: x['semantics']).attach(train_evaluator, 'semantics')
+
+    evaluator = Engine(_inference)
+    Loss(multitask_criterion, output_transform=lambda x: x['loss']).attach(evaluator, 'loss')
+    MeanAveragePrecision(num_classes, output_transform=lambda x: x['objects']).attach(evaluator, 'objects')
+    IntersectionOverUnion(num_classes, output_transform=lambda x: x['semantics']).attach(evaluator, 'semantics')
+
+    @trainer.on(Events.STARTED)
+    def initialize(engine):
+        if args.resume:
+            engine.state.epoch = args.start_epoch
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def print_times(engine):
-        pbar.log_message('Epoch [{}/{}] done. Time per batch: {:.3f}[s]'.format(engine.state.epoch,
+        pbar.log_message("Epoch [{}/{}] done. Time per batch: {:.3f}[s]".format(engine.state.epoch,
                                                                                 engine.state.max_epochs, timer.value()))
         timer.reset()
 
+    @trainer.on(Events.ITERATION_COMPLETED)
+    def log_training_loss(engine):
+        iteration = (engine.state.iteration - 1) % len(train_loader) + 1
+        if iteration % args.log_interval == 0:
+            writer.add_scalar("training/loss", engine.state.output['loss'], engine.state.iteration)
+
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_training_results(engine):
-        evaluator.run(train_loader)
-        metrics = evaluator.state.metrics
-        avg_accuracy = metrics['accuracy']
-        loss_semantics = metrics['loss_semantics']
-        loss_offsets = metrics['loss_offsets']
-        loss_ssdbox = metrics['loss_ssdbox']
-        loss_ssdclass = metrics['loss_ssdclass']
-        pbar.log_message('Training Results - Epoch: [{}/{}]  Avg accuracy: {:.4f} Avg semantic loss: {:.4f} '
-                         'Avg offsets loss: {:.4f} Avg ssdbox loss: {:.4f} Avg ssdclass loss: {:.4f}'
-                         .format(engine.state.epoch, engine.state.max_epochs, avg_accuracy, loss_semantics,
-                                 loss_offsets, loss_ssdbox, loss_ssdclass))
+        train_evaluator.run(train_loader)
+        metrics = train_evaluator.state.metrics
+        loss = metrics['loss']
+        mean_ap = metrics['objects']
+        iou = metrics['semantics']
+
+        pbar.log_message('Training results - Epoch: [{}/{}]: Loss: {:.4f}, mAP(50%): {:.1f}, IoU: {:.1f}'
+                         .format(loss, evaluator.state.epochs, evaluator.state.max_epochs, mean_ap, iou * 100.0))
+
+        writer.add_scalar("train-val/loss", loss, engine.state.epoch)
+        writer.add_scalar("train-val/mAP", mean_ap, engine.state.epoch)
+        writer.add_scalar("train-val/IoU", iou, engine.state.epoch)
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_validation_results(engine):
         evaluator.run(val_loader)
         metrics = evaluator.state.metrics
-        avg_accuracy = metrics['accuracy']
-        loss_semantics = metrics['loss_semantics']
-        loss_offsets = metrics['loss_offsets']
-        loss_ssdbox = metrics['loss_ssdbox']
-        loss_ssdclass = metrics['loss_ssdclass']
-        pbar.log_message('Validation Results - Epoch: [{}/{}]  Avg accuracy: {:.4f} Avg semantic loss: {:.4f} '
-                         'Avg offsets loss: {:.4f} Avg ssdbox loss: {:.4f} Avg ssdclass loss: {:.4f}'
-                         .format(engine.state.epoch, engine.state.max_epochs, avg_accuracy, loss_semantics,
-                                 loss_offsets, loss_ssdbox, loss_ssdclass))
+        loss = metrics['loss']
+        mean_ap = metrics['objects']
+        iou = metrics['semantics']
+
+        pbar.log_message('Validation results - Epoch: [{}/{}]: Loss: {:.4f}, mAP(50%): {:.1f}, IoU: {:.1f}'
+                         .format(loss, evaluator.state.epochs, evaluator.state.max_epochs, mean_ap, iou * 100.0))
+
+        writer.add_scalar("validation/loss", loss, engine.state.epoch)
+        writer.add_scalar("validation/mAP", mean_ap, engine.state.epoch)
+        writer.add_scalar("validation/IoU", iou, engine.state.epoch)
 
     @trainer.on(Events.EXCEPTION_RAISED)
     def handle_exception(engine, e):
         if isinstance(e, KeyboardInterrupt) and (engine.state.iteration > 1):
             engine.terminate()
-            warnings.warn('KeyboardInterrupt caught. Exiting gracefully.')
+            warnings.warn("KeyboardInterrupt caught. Exiting gracefully.")
 
             checkpoint_handler(engine, {'model_exception': model})
-
         else:
             raise e
 
-    trainer.run(train_loader, max_epochs=epochs)
+    @trainer.on(Events.COMPLETED)
+    def save_final_model(engine):
+        checkpoint_handler(engine, {'final': model})
+
+    trainer.run(train_loader, max_epochs=args.epochs)
+    writer.close()
 
 
 if __name__ == '__main__':
     parser = ArgumentParser('Box2Pix with PyTorch')
-    parser.add_argument('--batch_size', type=int, default=16,
-                        help='input batch size for training (default: 16)')
-    parser.add_argument('--val_batch_size', type=int, default=64,
-                        help='input batch size for validation (default: 64)')
-    parser.add_argument('--epochs', type=int, default=60,
-                        help='number of epochs to train (default: 60)')
-    parser.add_argument('--lr', type=float, default=0.0001,
-                        help='learning rate (default: 0.0001)')
-    parser.add_argument('--seed', type=int,
-                        help='manual seed')
+    parser.add_argument('--batch_size', type=int, default=8,
+                        help='input batch size for training')
+    parser.add_argument('--num-workers', type=int, default=8,
+                        help='number of workers')
+    parser.add_argument('--epochs', type=int, default=200,
+                        help='number of epochs to train')
+    parser.add_argument('--lr', type=float, default=1e-4,
+                        help='learning rate')
+    parser.add_argument('--seed', type=int, help='manual seed')
     parser.add_argument('--output-dir', default='./checkpoints',
                         help='directory to save model checkpoints')
+    parser.add_argument('--resume', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
+    parser.add_argument('--log-interval', type=int, default=10,
+                        help='how many batches to wait before logging training status')
+    parser.add_argument("--log-dir", type=str, default="tensorboard_logs",
+                        help="log directory for Tensorboard log output")
+    parser.add_argument("--dataset-dir", type=str, default="data/cityscapes",
+                        help="location of the dataset")
 
-    args = parser.parse_args()
-
-    run(args.batch_size, args.val_batch_size, args.epochs, args.lr, args.seed, args.output_dir)
+    run(parser.parse_args())
