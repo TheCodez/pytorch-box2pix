@@ -84,17 +84,60 @@ def d_change(prior, ground_truth):
                       + (torch.pow(ybr, 2) / hgt) + (torch.pow(xbr, 2) / wgt))
 
 
-def hard_negative_mining(conf_loss, positives):
-    batch_size = positives.size(0)
+def corner_to_center_form(boxes):
+    """Convert bounding boxes from (xmin, ymin, xmax, ymax) to (cx, cy, width, height)
 
-    conf_loss[positives] = 0
-    conf_loss = conf_loss.view(batch_size, -1)
+    Args:
+        boxes (tensor): Boxes, Shape: [num_priors, 4]
+    """
 
-    _, indices = conf_loss.sort(1, descending=True)
+    return torch.cat([(boxes[:, 2:] + boxes[:, :2]) / 2,
+                      boxes[:, 2:] - boxes[:, :2]], 1)
+
+
+def center_to_corner_form(boxes):
+    """Convert bounding boxes from (cx, cy, width, height) to (xmin, ymin, xmax, ymax)
+
+    Args:
+        boxes (tensor): Boxes, Shape: [num_priors, 4]
+    """
+
+    return torch.cat([boxes[:, 2:] - (boxes[:, :2] / 2),
+                      boxes[:, 2:] + (boxes[:, :2] / 2)], 1)
+
+
+def nms(boxes, scores, thresh):
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    _, indices = scores.scores.sort(0, descending=True)
+
+    keep = []
+    while indices.size > 0:
+        i = indices[0]
+        keep.append(i)
+
+        xx1 = torch.max(x1[i], x1[indices[1:]])
+        yy1 = torch.max(y1[i], y1[indices[1:]])
+        xx2 = torch.min(x2[i], x2[indices[1:]])
+        yy2 = torch.min(y2[i], y2[indices[1:]])
+
+        w = torch.clamp(xx2 - xx1, min=0.0)
+        h = torch.clamp(yy2 - yy1, min=0.0)
+        inter = w * h
+        ovr = inter / (areas[i] + areas[indices[1:]] - inter)
+
+        inds = torch.nonzero(ovr <= thresh).squeeze()
+        indices = indices[inds + 1]
+
+    return keep
 
 
 if __name__ == '__main__':
-
+    """
     layers = [
         # inception4e
         {'size': 427, 'boxes': []},
@@ -116,3 +159,4 @@ if __name__ == '__main__':
 
     for layer in layers:
         print('Number of priors: ', len(layer['boxes']))
+    """
