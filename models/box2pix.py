@@ -75,12 +75,12 @@ class Box2Pix(nn.Module):
         self.offs_upscore8 = nn.ConvTranspose2d(2, 2, kernel_size=16, stride=8, bias=False)
 
         self.multibox = MultiBox(num_classes)
-        self._initialize_weights()
+        self._initialize_weights(num_classes)
 
-    def _initialize_weights(self):
+    def _initialize_weights(self, num_classes):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                if m.kernel_size[0] == 1:
+                if m.kernel_size[0] == 1 and m.out_channels in [num_classes, 2]:
                     nn.init.constant_(m.weight, 0)
                     if m.bias is not None:
                         nn.init.constant_(m.bias, 0)
