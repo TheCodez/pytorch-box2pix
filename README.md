@@ -1,6 +1,15 @@
-# pytorch-box2pix
+# [WIP] pytorch-box2pix ![alt text](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)
 
 Inofficial PyTorch implementation of [Box2Pix: Single-Shot Instance Segmentation by Assigning Pixels to Object Boxes](https://lmb.informatik.uni-freiburg.de/Publications/2018/UB18) (Uhrig et al., 2018).
+
+## TODO:
+
+Those two are needed to get the project in a state where it can be trained:
+
+- [ ] Priorbox generation
+- [ ] mAP metric
+
+Once this is done the instance segmentation part can be added.
 
 ## Requirements
 
@@ -13,7 +22,7 @@ Inofficial PyTorch implementation of [Box2Pix: Single-Shot Instance Segmentation
 Train model:
 
 ```bash
-python train.py --lr 0.0001
+python train.py --dataset-dir 'data/cityscapes'
 ```
 
 ## Usage
