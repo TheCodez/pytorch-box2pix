@@ -24,26 +24,3 @@ Train model:
 ```bash
 python train.py --dataset-dir 'data/cityscapes'
 ```
-
-## Usage
-
-```bash
-usage: train.py [-h] [--batch_size BATCH_SIZE]
-                     [--val_batch_size VAL_BATCH_SIZE]
-                     [--epochs EPOCHS] [--lr LR] [--seed SEED]
-                     [--output-dir OUTPUT_DIR]
-
-Box2Pix with PyTorch
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --batch_size BATCH_SIZE
-                        input batch size for training (default: 16)
-  --val_batch_size VAL_BATCH_SIZE
-                        input batch size for validation (default: 64)
-  --epochs EPOCHS       number of epochs to train (default: 60)
-  --lr LR               learning rate (default: 0.0001)
-  --seed SEED           manual seed
-  --output-dir OUTPUT_DIR
-                        directory to save model checkpoints
-```
