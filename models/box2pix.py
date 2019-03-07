@@ -8,13 +8,15 @@ from models.multibox import MultiBox
 from utils.helper import get_upsampling_weight
 
 
-def box2pix(num_classes=11, pretrained=False):
+def box2pix(num_classes=11, pretrained=False, **kwargs):
     if pretrained:
-        model = Box2Pix(num_classes)
+        if 'transform_input' not in kwargs:
+            kwargs['transform_input'] = True
+        model = Box2Pix(num_classes, **kwargs)
         model.load_state_dict(model_zoo.load_url(''))
         return model
 
-    return Box2Pix(num_classes)
+    return Box2Pix(num_classes, **kwargs)
 
 
 class Box2Pix(nn.Module):
@@ -23,15 +25,14 @@ class Box2Pix(nn.Module):
             <https://lmb.informatik.uni-freiburg.de/Publications/2018/UB18>
     """
 
-    def __init__(self, num_classes=11):
+    def __init__(self, num_classes=11, transform_input=False):
         super(Box2Pix, self).__init__()
+        self.transform_input = transform_input
 
         self.conv1 = BasicConv2d(3, 64, kernel_size=7, stride=2, padding=3)
         self.maxpool1 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
-        self.lrn1 = nn.LocalResponseNorm(5, alpha=0.0001, beta=0.75)
         self.conv2 = BasicConv2d(64, 64, kernel_size=1)
         self.conv3 = BasicConv2d(64, 192, kernel_size=3, padding=1)
-        self.lrn2 = nn.LocalResponseNorm(5, alpha=0.0001, beta=0.75)
 
         self.maxpool2 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
         self.inception3a = Inception(192, 64, 96, 128, 16, 32, 32)
@@ -44,15 +45,15 @@ class Box2Pix(nn.Module):
         self.inception4d = Inception(512, 112, 144, 288, 32, 64, 64)
         self.inception4e = Inception(528, 256, 160, 320, 32, 128, 128)
 
-        self.maxpool4 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
+        self.maxpool4 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
         self.inception5a = Inception(832, 256, 160, 320, 32, 128, 128)
         self.inception5b = Inception(832, 384, 192, 384, 48, 128, 128)
 
-        self.maxpool5 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
+        self.maxpool5 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
         self.inception6a = Inception(1024, 256, 160, 320, 32, 128, 128)
         self.inception6b = Inception(832, 384, 192, 384, 48, 128, 128)
 
-        self.maxpool6 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
+        self.maxpool6 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
         self.inception7a = Inception(1024, 256, 160, 320, 32, 128, 128)
         self.inception7b = Inception(832, 384, 192, 384, 48, 128, 128)
 
@@ -98,6 +99,7 @@ class Box2Pix(nn.Module):
     def init_from_googlenet(self):
         googlenet = models.googlenet(pretrained=True)
         self.load_state_dict(googlenet.state_dict(), strict=False)
+        self.transform_input = True
 
         for l1, l2 in zip([self.inception6b.modules(), self.inception7b.modules()],
                           [googlenet.inception5b.modules(), googlenet.inception5b.modules()]):
@@ -106,16 +108,23 @@ class Box2Pix(nn.Module):
                 if l1.bias is not None:
                     l1.bias.data.copy_(l2.bias.data)
 
+    def _transform_input(self, x):
+        x_ch0 = torch.unsqueeze(x[:, 0], 1) * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
+        x_ch1 = torch.unsqueeze(x[:, 1], 1) * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
+        x_ch2 = torch.unsqueeze(x[:, 2], 1) * (0.225 / 0.5) + (0.406 - 0.5) / 0.5
+
+        return torch.cat([x_ch0, x_ch1, x_ch2], 1)
+
     def forward(self, x):
         feature_maps = []
         size = x.size()
 
+        if self.transform_input:
+            x = self._transform_input(x)
         x = self.conv1(x)
         x = self.maxpool1(x)
-        x = self.lrn1(x)
         x = self.conv2(x)
         x = self.conv3(x)
-        x = self.lrn2(x)
         x = self.maxpool2(x)
         x = self.inception3a(x)
         inception3b = self.inception3b(x)
