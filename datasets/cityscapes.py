@@ -79,7 +79,7 @@ class CityscapesDataset(datasets.Cityscapes):
         cmap = torch.zeros([256, 3], dtype=torch.uint8)
 
         for cls in CityscapesDataset.classes:
-            if cls.hasInstances:
+            if cls.has_instances:
                 cmap[cls.trainId, :] = torch.tensor(cls.color, dtype=torch.uint8)
 
         return cmap
