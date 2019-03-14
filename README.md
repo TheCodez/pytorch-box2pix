@@ -14,7 +14,7 @@ Once this is done the instance segmentation part can be added.
 ## Requirements
 
 - Install PyTorch ([pytorch.org](http://pytorch.org))
-- `pip install -r requirements.txt`
+- `pip install -r requirements.txt` (Currently requires torchvision master)
 - Download the Cityscapes dataset
 
 ## Usage
