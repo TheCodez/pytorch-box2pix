@@ -8,11 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from ignite.contrib.handlers import ProgressBar
+from ignite.contrib.handlers.tensorboard_logger import *
 from ignite.engine import Events, Engine
 from ignite.handlers import ModelCheckpoint, Timer
-from ignite.metrics import RunningAverage, Loss
+from ignite.metrics import RunningAverage, Loss, ConfusionMatrix, mIoU
 from ignite.utils import convert_tensor
-from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from torchvision.transforms import Normalize
 
@@ -22,21 +22,9 @@ from datasets.transforms import transforms
 from datasets.transforms.transforms import ToTensor
 from loss.boxloss import BoxLoss
 from loss.multitaskloss import MultiTaskLoss
-from metrics.iou import IntersectionOverUnion
 from metrics.mean_ap import MeanAveragePrecision
 from utils import helper
 from utils.box_coder import BoxCoder
-
-
-def create_summary_writer(model, data_loader, log_dir):
-    writer = SummaryWriter(log_dir=log_dir)
-    data_loader_iter = iter(data_loader)
-    x, instance, boxes, labels = next(data_loader_iter)
-    try:
-        writer.add_graph(model, x)
-    except Exception as e:
-        print("Failed to save model graph: {}".format(e))
-    return writer
 
 
 def get_data_loaders(data_dir, batch_size, num_workers):
@@ -72,10 +60,8 @@ def run(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     num_classes = CityscapesDataset.num_instance_classes() + 1
-    model = models.box2pix(num_classes=num_classes)
+    model = models.box2pix(num_classes)
     model.init_from_googlenet()
-
-    writer = create_summary_writer(model, train_loader, args.log_dir)
 
     if torch.cuda.device_count() > 1:
         print("Using %d GPU(s)" % torch.cuda.device_count())
@@ -185,14 +171,50 @@ def run(args):
         }
 
     train_evaluator = Engine(_inference)
+    cm = ConfusionMatrix(num_classes=num_classes, output_transform=lambda x: x['semantics'])
+    mIoU(cm, ignore_index=0).attach(train_evaluator, 'mIoU')
     Loss(multitask_criterion, output_transform=lambda x: x['loss']).attach(train_evaluator, 'loss')
-    MeanAveragePrecision(num_classes, output_transform=lambda x: x['objects']).attach(train_evaluator, 'objects')
-    IntersectionOverUnion(num_classes, output_transform=lambda x: x['semantics']).attach(train_evaluator, 'semantics')
+    MeanAveragePrecision(num_classes, output_transform=lambda x: x['objects']).attach(train_evaluator, 'mAP')
 
     evaluator = Engine(_inference)
+    cm2 = ConfusionMatrix(num_classes=num_classes, output_transform=lambda x: x['semantics'])
+    mIoU(cm2, ignore_index=0).attach(train_evaluator, 'mIoU')
     Loss(multitask_criterion, output_transform=lambda x: x['loss']).attach(evaluator, 'loss')
-    MeanAveragePrecision(num_classes, output_transform=lambda x: x['objects']).attach(evaluator, 'objects')
-    IntersectionOverUnion(num_classes, output_transform=lambda x: x['semantics']).attach(evaluator, 'semantics')
+    MeanAveragePrecision(num_classes, output_transform=lambda x: x['objects']).attach(evaluator, 'mAP')
+
+    tb_logger = TensorboardLogger(args.log_dir)
+    tb_logger.attach(trainer,
+                     log_handler=OutputHandler(tag='training', output_transform=lambda loss: {
+                         'loss': loss['loss'],
+                         'loss_semantics': loss['loss_semantics'],
+                         'loss_offsets': loss['loss_offsets'],
+                         'loss_ssdbox': loss['loss_ssdbox'],
+                         'loss_ssdclass': loss['loss_ssdclass']
+
+                     }),
+                     event_name=Events.ITERATION_COMPLETED)
+
+    tb_logger.attach(train_evaluator,
+                     log_handler=OutputHandler(tag='training_eval',
+                                               metric_names=['loss', 'mAP', 'mIoU'],
+                                               output_transform=lambda loss: {
+                                                   'loss': loss['loss'],
+                                                   'objects': loss['objects'],
+                                                   'semantics': loss['semantics']
+                                               },
+                                               another_engine=trainer),
+                     event_name=Events.EPOCH_COMPLETED)
+
+    tb_logger.attach(evaluator,
+                     log_handler=OutputHandler(tag='validation_eval',
+                                               metric_names=['loss', 'mAP', 'mIoU'],
+                                               output_transform=lambda loss: {
+                                                   'loss': loss['loss'],
+                                                   'objects': loss['objects'],
+                                                   'semantics': loss['semantics']
+                                               },
+                                               another_engine=trainer),
+                     event_name=Events.EPOCH_COMPLETED)
 
     @trainer.on(Events.STARTED)
     def initialize(engine):
@@ -205,41 +227,27 @@ def run(args):
                                                                                 engine.state.max_epochs, timer.value()))
         timer.reset()
 
-    @trainer.on(Events.ITERATION_COMPLETED)
-    def log_training_loss(engine):
-        iteration = (engine.state.iteration - 1) % len(train_loader) + 1
-        if iteration % args.log_interval == 0:
-            writer.add_scalar("training/loss", engine.state.output['loss'], engine.state.iteration)
-
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_training_results(engine):
         train_evaluator.run(train_loader)
         metrics = train_evaluator.state.metrics
         loss = metrics['loss']
-        mean_ap = metrics['objects']
-        iou = metrics['semantics']
+        mean_ap = metrics['mAP']
+        iou = metrics['mIoU']
 
         pbar.log_message('Training results - Epoch: [{}/{}]: Loss: {:.4f}, mAP(50%): {:.1f}, IoU: {:.1f}'
                          .format(loss, evaluator.state.epochs, evaluator.state.max_epochs, mean_ap, iou * 100.0))
-
-        writer.add_scalar("train-val/loss", loss, engine.state.epoch)
-        writer.add_scalar("train-val/mAP", mean_ap, engine.state.epoch)
-        writer.add_scalar("train-val/IoU", iou, engine.state.epoch)
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_validation_results(engine):
         evaluator.run(val_loader)
         metrics = evaluator.state.metrics
         loss = metrics['loss']
-        mean_ap = metrics['objects']
-        iou = metrics['semantics']
+        mean_ap = metrics['mAP']
+        iou = metrics['mIoU']
 
         pbar.log_message('Validation results - Epoch: [{}/{}]: Loss: {:.4f}, mAP(50%): {:.1f}, IoU: {:.1f}'
                          .format(loss, evaluator.state.epochs, evaluator.state.max_epochs, mean_ap, iou * 100.0))
-
-        writer.add_scalar("validation/loss", loss, engine.state.epoch)
-        writer.add_scalar("validation/mAP", mean_ap, engine.state.epoch)
-        writer.add_scalar("validation/IoU", iou, engine.state.epoch)
 
     @trainer.on(Events.EXCEPTION_RAISED)
     def handle_exception(engine, e):
@@ -256,7 +264,7 @@ def run(args):
         checkpoint_handler(engine, {'final': model})
 
     trainer.run(train_loader, max_epochs=args.epochs)
-    writer.close()
+    tb_logger.close()
 
 
 if __name__ == '__main__':
