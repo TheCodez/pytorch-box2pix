@@ -50,12 +50,12 @@ class Box2Pix(nn.Module):
         self.inception5b = Inception(832, 384, 192, 384, 48, 128, 128)
 
         self.maxpool5 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
-        self.inception6a = Inception(1024, 256, 160, 320, 32, 128, 128)
-        self.inception6b = Inception(832, 384, 192, 384, 48, 128, 128)
+        self.inception6a = Inception2(1024, 256, 160, 320, 32, 128, 128)
+        self.inception6b = Inception2(832, 384, 192, 384, 48, 128, 128)
 
         self.maxpool6 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
-        self.inception7a = Inception(1024, 256, 160, 320, 32, 128, 128)
-        self.inception7b = Inception(832, 384, 192, 384, 48, 128, 128)
+        self.inception7a = Inception2(1024, 256, 160, 320, 32, 128, 128)
+        self.inception7b = Inception2(832, 384, 192, 384, 48, 128, 128)
 
         self.sem_score3b = nn.Conv2d(480, num_classes, kernel_size=1)
         self.sem_score4e = nn.Conv2d(832, num_classes, kernel_size=1)
@@ -98,12 +98,6 @@ class Box2Pix(nn.Module):
         googlenet = models.googlenet(pretrained=True)
         self.load_state_dict(googlenet.state_dict(), strict=False)
         self.transform_input = True
-
-        for l1, l2 in zip([self.inception6b.modules(), self.inception7b.modules()],
-                          [googlenet.inception5b.modules(), googlenet.inception5b.modules()]):
-            if isinstance(l1, nn.Conv2d) and isinstance(l2, nn.Conv2d):
-                with torch.no_grad():
-                    l1.weight.copy_(l2.weight.data)
 
     def _transform_input(self, x):
         x_ch0 = torch.unsqueeze(x[:, 0], 1) * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
@@ -183,6 +177,35 @@ class Box2Pix(nn.Module):
         offsets = offsets[:, :, 4:4 + size[2], 4:4 + size[3]].contiguous()
 
         return loc_preds, conf_preds, semantics, offsets
+
+
+class Inception2(nn.Module):
+
+    def __init__(self, in_channels, ch1x1, ch3x3red, ch3x3, ch5x5red, ch5x5, pool_proj):
+        super(Inception2, self).__init__()
+
+        self.branch1 = BasicConv2d(in_channels, ch1x1, kernel_size=1)
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_channels, ch3x3red, kernel_size=1),
+            BasicConv2d(ch3x3red, ch3x3, kernel_size=3, padding=1)
+        )
+        self.branch3 = nn.Sequential(
+            BasicConv2d(in_channels, ch5x5red, kernel_size=1),
+            BasicConv2d(ch5x5red, ch5x5, kernel_size=5, padding=2)
+        )
+        self.branch4 = nn.Sequential(
+            nn.MaxPool2d(kernel_size=3, stride=1, padding=1, ceil_mode=True),
+            BasicConv2d(in_channels, pool_proj, kernel_size=1)
+        )
+
+    def forward(self, x):
+        branch1 = self.branch1(x)
+        branch2 = self.branch2(x)
+        branch3 = self.branch3(x)
+        branch4 = self.branch4(x)
+
+        outputs = [branch1, branch2, branch3, branch4]
+        return torch.cat(outputs, 1)
 
 
 if __name__ == '__main__':
