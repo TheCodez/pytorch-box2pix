@@ -83,15 +83,13 @@ class Box2Pix(nn.Module):
             if isinstance(m, nn.Conv2d):
                 if m.kernel_size[0] == 1 and m.out_channels in [num_classes, 2]:
                     nn.init.constant_(m.weight, 0)
-                    if m.bias is not None:
-                        nn.init.constant_(m.bias, 0)
+                    nn.init.constant_(m.bias, 0)
                 else:
                     nn.init.xavier_uniform_(m.weight)
-                    if m.bias is not None:
-                        nn.init.constant_(m.bias, 0.2)
             elif isinstance(m, nn.ConvTranspose2d):
                 upsampling_weight = get_upsampling_weight(m.out_channels, m.kernel_size[0])
-                m.weight.data.copy_(upsampling_weight)
+                with torch.no_grad():
+                    m.weight.copy_(upsampling_weight)
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -104,9 +102,8 @@ class Box2Pix(nn.Module):
         for l1, l2 in zip([self.inception6b.modules(), self.inception7b.modules()],
                           [googlenet.inception5b.modules(), googlenet.inception5b.modules()]):
             if isinstance(l1, nn.Conv2d) and isinstance(l2, nn.Conv2d):
-                l1.weight.data.copy_(l2.weight.data)
-                if l1.bias is not None:
-                    l1.bias.data.copy_(l2.bias.data)
+                with torch.no_grad():
+                    l1.weight.copy_(l2.weight.data)
 
     def _transform_input(self, x):
         x_ch0 = torch.unsqueeze(x[:, 0], 1) * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
@@ -192,6 +189,7 @@ if __name__ == '__main__':
     num_classes, width, height = 20, 1024, 2048
 
     model = Box2Pix(num_classes)  # .to('cuda')
+    model.init_from_googlenet()
     inp = torch.randn(1, 3, height, width)  # .to('cuda')
 
     loc, conf, sem, offs = model(inp)

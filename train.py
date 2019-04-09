@@ -75,7 +75,7 @@ def run(args):
     multitask_criterion = MultiTaskLoss().to(device)
 
     box_coder = BoxCoder()
-    optimizer = optim.Adam([{'params': model.parameters(), 'weight_decay': 5e-4},
+    optimizer = optim.Adam([{'params': model.parameters()},
                             {'params': multitask_criterion.parameters()}], lr=args.lr)
 
     if args.resume:
