@@ -1,11 +1,6 @@
-import collections
-import itertools
-
 import torch
 
 from utils import box_utils
-
-SSDSpec = collections.namedtuple('SSDSpec', ['feature_map_size', 'shrinkage'])
 
 
 class BoxCoder(object):
@@ -15,22 +10,11 @@ class BoxCoder(object):
             https://github.com/kuangliu/torchcv
     """
 
-    def __init__(self):
+    def __init__(self, img_size=(1024, 2048)):
         self.variances = (0.1, 0.2)
 
-        self.steps = ((8, 16), (16, 32), (32, 64), (64, 128))
-        self.aspect_ratios = ((2,), (2, 3), (2, 3), (2, 3), (2,), (2,))
-        self.fm_sizes = (128, 64, 32, 16)
-
+        self.img_height, self.img_width = img_size
         self.feature_maps = [(128, 64), (64, 32), (32, 16), (16, 8)]
-
-        self.specs = [
-            SSDSpec(128, 8),
-            SSDSpec(64, 16),
-            SSDSpec(32, 32),
-            SSDSpec(16, 64)
-        ]
-
         self.priors = self.get_prior_boxes()
 
     def get_prior_boxes(self):
@@ -43,21 +27,20 @@ class BoxCoder(object):
         ]
 
         boxes = []
-        for spec in self.specs:
-            scale_y = 1024 / spec.shrinkage
-            scale_x = 2048 / spec.shrinkage
-            #for j, i in itertools.product(range(spec.feature_map_size), repeat=2):
-                #print('j:', j)
-                #print('i:', i)
+        for width, height in self.feature_maps:
+            step_w = width / self.img_width
+            step_h = height / self.img_height
+            for x in range(width):
+                for y in range(height):
+                    for p_h, p_w in priors:
+                        cx = (x + 0.5) * step_w
+                        cy = (y + 0.5) * step_h
+                        h = p_h / self.img_height
+                        w = p_w / self.img_width
 
-            x_center = (0 + 0.5) / scale_x
-            y_center = (0 + 0.5) / scale_y
+                        boxes.append((cx, cy, h, w))
 
-            for prior in priors:
-                w, h = prior
-                boxes.append([x_center, y_center, w, h])
-
-        return torch.Tensor(boxes)
+        return torch.as_tensor(boxes)
 
     def encode(self, boxes, labels, change_threshold=0.7):
         """Encode target bounding boxes and class labels.
@@ -125,7 +108,7 @@ class BoxCoder(object):
 
             keep = box  # torchvision.layers.nms(box, score, nms_thresh)
             boxes.append(box[keep])
-            labels.append(torch.full(len(box[keep]), i, dtype=torch.int64))
+            labels.append(torch.full(box[keep].size()[0], i, dtype=torch.int64))
             scores.append(score[keep])
 
         boxes = torch.cat(boxes, 0)
