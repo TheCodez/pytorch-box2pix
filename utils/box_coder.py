@@ -1,6 +1,10 @@
+from collections import namedtuple
+
 import torch
 
 from utils import box_utils
+
+FeatureMapDef = namedtuple('FeatureMapDef', ['width', 'height', 'receptive_size'])
 
 
 class BoxCoder(object):
@@ -10,14 +14,9 @@ class BoxCoder(object):
             https://github.com/kuangliu/torchcv
     """
 
-    def __init__(self, img_size=(1024, 2048)):
+    def __init__(self, img_width=2048, img_height=1024):
         self.variances = (0.1, 0.2)
 
-        self.img_height, self.img_width = img_size
-        self.feature_maps = [(128, 64), (64, 32), (32, 16), (16, 8)]
-        self.priors = self.get_prior_boxes()
-
-    def get_prior_boxes(self):
         priors = [
             # height, width
             (4, 52), (24, 24), (54, 8), (80, 22), (52, 52),
@@ -26,21 +25,29 @@ class BoxCoder(object):
             (772, 526), (476, 820), (150, 1122), (890, 880), (516, 1130)
         ]
 
+        feature_maps = [
+            FeatureMapDef(128, 64, 427),
+            FeatureMapDef(64, 32, 715),
+            FeatureMapDef(32, 16, 1291),
+            FeatureMapDef(16, 8, 2443)
+        ]
+
         boxes = []
-        for width, height in self.feature_maps:
-            step_w = width / self.img_width
-            step_h = height / self.img_height
-            for x in range(width):
-                for y in range(height):
+        for fm in feature_maps:
+            step_w = fm.width / img_width
+            step_h = fm.height / img_height
+            for x in range(fm.width):
+                for y in range(fm.height):
                     for p_h, p_w in priors:
                         cx = (x + 0.5) * step_w
                         cy = (y + 0.5) * step_h
-                        h = p_h / self.img_height
-                        w = p_w / self.img_width
+                        h = p_h / img_height
+                        w = p_w / img_width
 
-                        boxes.append((cx, cy, h, w))
+                        if fm.receptive_size > (p_h * 2) or fm.receptive_size > (p_w * 2):
+                            boxes.append((cx, cy, h, w))
 
-        return torch.as_tensor(boxes)
+        self.priors = torch.as_tensor(boxes, dtype=torch.float32).clamp_(0.0, 1.0)
 
     def encode(self, boxes, labels, change_threshold=0.7):
         """Encode target bounding boxes and class labels.
