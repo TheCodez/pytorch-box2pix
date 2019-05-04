@@ -1,55 +1,5 @@
 import torch
 
-priors = [
-    # height, width
-    (4, 52),
-    (25, 25),
-    (54, 8),
-    (80, 22),
-    (52, 52),
-    (20, 78),
-    (156, 50),
-    (78, 78),
-    (48, 144),
-    (412, 76),
-    (104, 150),
-    (74, 404),
-    (645, 166),
-    (358, 448),
-    (70, 686),
-    (68, 948),
-    (772, 526),
-    (476, 820),
-    (150, 1122),
-    (890, 880),
-    (518, 1130)
-]
-
-priors_new = [
-    # height, width
-    (4, 52),
-    (24, 24),
-    (54, 8),
-    (80, 22),
-    (52, 52),
-    (20, 78),
-    (156, 50),
-    (78, 78),
-    (48, 144),
-    (412, 76),
-    (104, 150),
-    (74, 404),
-    (644, 166),
-    (358, 448),
-    (70, 686),
-    (68, 948),
-    (772, 526),
-    (476, 820),
-    (150, 1122),
-    (890, 880),
-    (516, 1130)
-]
-
 
 def get_bounding_box(polygon):
     fpoint = polygon[0]
@@ -64,6 +14,7 @@ def get_bounding_box(polygon):
     return xmin, ymin, xmax, ymax
 
 
+@torch.jit.script
 def d_change(prior, ground_truth):
     """Compute a change based metric of two sets of boxes.
 
@@ -84,6 +35,7 @@ def d_change(prior, ground_truth):
                       + (torch.pow(ybr, 2) / hgt) + (torch.pow(xbr, 2) / wgt))
 
 
+@torch.jit.script
 def corner_to_center_form(boxes):
     """Convert bounding boxes from (xmin, ymin, xmax, ymax) to (cx, cy, width, height)
 
@@ -95,6 +47,7 @@ def corner_to_center_form(boxes):
                       boxes[:, 2:] - boxes[:, :2]], 1)
 
 
+@torch.jit.script
 def center_to_corner_form(boxes):
     """Convert bounding boxes from (cx, cy, width, height) to (xmin, ymin, xmax, ymax)
 
@@ -106,6 +59,7 @@ def center_to_corner_form(boxes):
                       boxes[:, 2:] + (boxes[:, :2] / 2)], 1)
 
 
+"""
 def nms(boxes, scores, thresh):
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
@@ -134,6 +88,7 @@ def nms(boxes, scores, thresh):
         indices = indices[inds + 1]
 
     return keep
+"""
 
 
 if __name__ == '__main__':

@@ -21,5 +21,6 @@ def get_upsampling_weight(channels, kernel_size):
     return weight
 
 
+@torch.jit.script
 def assign_pix2box(semantics, offsets, boxes, labels):
     return semantics
