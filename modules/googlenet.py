@@ -8,9 +8,8 @@ from torchvision import models
 
 class GoogLeNet(torch.jit.ScriptModule):
 
-    def __init__(self, transform_input=False, init_from_googlenet=False):
+    def __init__(self, init_googlenet=False):
         super(GoogLeNet, self).__init__()
-        self.transform_input = torch.jit.Attribute(transform_input, bool)
 
         self.conv1 = BasicConv2d(3, 64, kernel_size=7, stride=2, padding=3)
         self.maxpool1 = nn.MaxPool2d(3, stride=2, ceil_mode=True)
@@ -47,13 +46,12 @@ class GoogLeNet(torch.jit.ScriptModule):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-        if init_from_googlenet:
+        if init_googlenet:
             self._init_from_googlenet()
 
     def _init_from_googlenet(self):
         googlenet = models.googlenet(pretrained=True)
         self.load_state_dict(googlenet.state_dict(), strict=False)
-        self.transform_input = True
 
     @torch.jit.script_method
     def _transform_input(self, x):
@@ -66,12 +64,10 @@ class GoogLeNet(torch.jit.ScriptModule):
     @torch.jit.script_method
     def forward(self, x):
         # type: (Tensor) -> Tuple[List[Tensor], Dict[str, Tensor]]
-
         feature_maps = []
         outputs = torch.jit.annotate(Dict[str, torch.Tensor], {})
 
-        if self.transform_input:
-            x = self._transform_input(x)
+        x = self._transform_input(x)
         x = self.conv1(x)
         x = self.maxpool1(x)
         x = self.conv2(x)

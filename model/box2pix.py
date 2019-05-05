@@ -6,13 +6,13 @@ from modules.googlenet import GoogLeNet
 from modules.multibox import MultiBox
 
 
-def box2pix(num_classes=11, pretrained=False, init_from_googlenet=False):
+def box2pix(num_classes=11, pretrained=False, init_googlenet=False):
     if pretrained:
-        model = Box2Pix(num_classes, transform_input=True)
+        model = Box2Pix(num_classes, init_googlenet=False)
         model.load_state_dict(model_zoo.load_url(''))
         return model
-    elif init_from_googlenet:
-        model = Box2Pix(num_classes, init_from_googlenet=True)
+    elif init_googlenet:
+        model = Box2Pix(num_classes, init_googlenet=True)
         return model
     return Box2Pix(num_classes)
 
@@ -23,10 +23,10 @@ class Box2Pix(torch.jit.ScriptModule):
             <https://lmb.informatik.uni-freiburg.de/Publications/2018/UB18>
     """
 
-    def __init__(self, num_classes=11, transform_input=False, init_from_googlenet=False):
+    def __init__(self, num_classes=11, init_googlenet=False):
         super(Box2Pix, self).__init__()
 
-        self.googlenet = GoogLeNet(transform_input, init_from_googlenet)
+        self.googlenet = GoogLeNet(init_googlenet)
         self.offsets = FCNHead(2)
         self.semantics = FCNHead(num_classes)
         self.multibox = MultiBox(num_classes)
@@ -46,7 +46,7 @@ class Box2Pix(torch.jit.ScriptModule):
 if __name__ == '__main__':
     num_classes, width, height = 20, 1024, 2048
 
-    model = Box2Pix(num_classes, init_from_googlenet=True)  # .to('cuda')
+    model = Box2Pix(num_classes, init_googlenet=True)  # .to('cuda')
     inp = torch.randn(1, 3, height, width)  # .to('cuda')
 
     loc, conf, sem, offs = model(inp)
