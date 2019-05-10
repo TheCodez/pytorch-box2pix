@@ -4,12 +4,11 @@ Inofficial PyTorch implementation of [Box2Pix: Single-Shot Instance Segmentation
 
 ## TODO:
 
-Those two are needed to get the project in a state where it can be trained:
+This is needed to get the project in a state where it can be trained:
 
-- [ ] Priorbox generation
 - [ ] mAP metric
 
-Once this is done the instance segmentation part can be added.
+Instance segmentation can be added later as it's just a post processing step.
 
 ## Requirements
 
