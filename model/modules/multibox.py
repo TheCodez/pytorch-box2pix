@@ -15,8 +15,8 @@ class MultiBox(torch.jit.ScriptModule):
         num_defaults = [16, 16, 20, 21]
         in_channels = [832, 1024, 1024, 1024]
 
-        loc = []  # torch.jit.annotate(nn.Module, [])
-        conf = []  # torch.jit.annotate(nn.Module, [])
+        loc = []
+        conf = []
         for i in range(len(in_channels)):
             loc.append(nn.Conv2d(in_channels[i], num_defaults[i] * 4, kernel_size=1))
             conf.append(nn.Conv2d(in_channels[i], num_defaults[i] * num_classes, kernel_size=1))
@@ -24,9 +24,6 @@ class MultiBox(torch.jit.ScriptModule):
         self.loc_layers = nn.ModuleList(loc)
         self.conf_layers = nn.ModuleList(conf)
 
-        self._initialize_weights()
-
-    def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.xavier_uniform_(m.weight)
@@ -40,9 +37,8 @@ class MultiBox(torch.jit.ScriptModule):
 
         #"""
         i = 0
-        for l in self.loc_layers:
-            layer = input[i]
-            loc = l(layer)
+        for loc_layer in self.loc_layers:
+            loc = loc_layer(input[i])
             # (N x C x H x W) -> (N x H x W x C)
             loc = loc.permute(0, 2, 3, 1).contiguous()
             loc = loc.view(loc.size(0), -1, 4)
@@ -50,15 +46,13 @@ class MultiBox(torch.jit.ScriptModule):
             i += 1
 
         i = 0
-        for c in self.conf_layers:
-            layer = input[i]
-            conf = c(layer)
+        for conf_layer in self.conf_layers:
+            conf = conf_layer(input[i])
             # (N x C x H x W) -> (N x H x W x C)
             conf = conf.permute(0, 2, 3, 1).contiguous()
             conf = conf.view(conf.size(0), -1, self.num_classes)
             confs.append(conf)
             i += 1
-        #"""
 
         """
         i = 0
