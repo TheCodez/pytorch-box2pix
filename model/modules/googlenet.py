@@ -7,6 +7,8 @@ from torchvision import models
 
 
 class GoogLeNet(torch.jit.ScriptModule):
+    """A GoogLeNet feature extractor for FCN and SSD.
+    """
 
     def __init__(self, init_googlenet=False):
         super(GoogLeNet, self).__init__()
@@ -30,14 +32,6 @@ class GoogLeNet(torch.jit.ScriptModule):
         self.maxpool4 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
         self.inception5a = Inception(832, 256, 160, 320, 32, 128, 128)
         self.inception5b = Inception(832, 384, 192, 384, 48, 128, 128)
-
-        self.maxpool5 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
-        self.inception6a = Inception2(1024, 256, 160, 320, 32, 128, 128)
-        self.inception6b = Inception2(832, 384, 192, 384, 48, 128, 128)
-
-        self.maxpool6 = nn.MaxPool2d(2, stride=2, ceil_mode=True)
-        self.inception7a = Inception2(1024, 256, 160, 320, 32, 128, 128)
-        self.inception7b = Inception2(832, 384, 192, 384, 48, 128, 128)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -63,9 +57,8 @@ class GoogLeNet(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        # type: (Tensor) -> Tuple[List[Tensor], Dict[str, Tensor]]
+        # type: (Tensor) -> List[Tensor]
         feature_maps = []
-        outputs = torch.jit.annotate(Dict[str, torch.Tensor], {})
 
         x = self._transform_input(x)
         x = self.conv1(x)
@@ -74,31 +67,22 @@ class GoogLeNet(torch.jit.ScriptModule):
         x = self.conv3(x)
         x = self.maxpool2(x)
         x = self.inception3a(x)
-        outputs['inception3b'] = self.inception3b(x)
-        x = self.maxpool3(outputs['inception3b'])
+        inception3b = self.inception3b(x)
+        feature_maps.append(inception3b)
+        x = self.maxpool3(inception3b)
         x = self.inception4a(x)
         x = self.inception4b(x)
         x = self.inception4c(x)
         x = self.inception4d(x)
-        outputs['inception4e'] = self.inception4e(x)
-        feature_maps.append(outputs['inception4e'])
+        inception4e = self.inception4e(x)
+        feature_maps.append(inception4e)
 
-        x = self.maxpool4(outputs['inception4e'])
+        x = self.maxpool4(inception4e)
         x = self.inception5a(x)
-        outputs['inception5b'] = self.inception5b(x)
-        feature_maps.append(outputs['inception5b'])
+        inception5b = self.inception5b(x)
+        feature_maps.append(inception5b)
 
-        x = self.maxpool5(outputs['inception5b'])
-        x = self.inception6a(x)
-        outputs['inception6b'] = self.inception6b(x)
-        feature_maps.append(outputs['inception6b'])
-
-        x = self.maxpool6(outputs['inception6b'])
-        x = self.inception7a(x)
-        inception7b = self.inception7b(x)
-        feature_maps.append(inception7b)
-
-        return feature_maps, outputs
+        return feature_maps
 
 
 class Inception(torch.jit.ScriptModule):
@@ -150,6 +134,12 @@ class BasicConv2d(torch.jit.ScriptModule):
 
 
 class Inception2(torch.jit.ScriptModule):
+    """A replacement for the default Inception module which follows the GoogLeNet paper
+    by having one branch with 5x5 convolutions. The default inception module, which was ported from TensorFlow
+    uses 3x3 convolutions instead for some reason. Using this might improve performance as the new inceptions
+    blocks would have been trained from scratch anyways.
+    """
+
     __constants__ = ['branch2', 'branch3', 'branch4']
 
     def __init__(self, in_channels, ch1x1, ch3x3red, ch3x3, ch5x5red, ch5x5, pool_proj):
@@ -169,12 +159,25 @@ class Inception2(torch.jit.ScriptModule):
             BasicConv2d(in_channels, pool_proj, kernel_size=1)
         )
 
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
     @torch.jit.script_method
     def forward(self, x):
         branch1 = self.branch1(x)
+        print('branch1: ', branch1.size())
         branch2 = self.branch2(x)
+        print('branch2: ', branch2.size())
         branch3 = self.branch3(x)
+        print('branch3: ', branch3.size())
         branch4 = self.branch4(x)
+        print('branch4: ', branch4.size())
 
         outputs = [branch1, branch2, branch3, branch4]
-        return torch.cat(outputs, 1)
+        out = torch.cat(outputs, 1)
+        print('out: ', out.size())
+        return out

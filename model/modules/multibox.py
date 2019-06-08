@@ -15,14 +15,14 @@ class MultiBox(torch.jit.ScriptModule):
         num_defaults = [16, 16, 20, 21]
         in_channels = [832, 1024, 1024, 1024]
 
-        loc = []
-        conf = []
+        loc_layers = nn.ModuleList()
+        conf_layers = nn.ModuleList()
         for i in range(len(in_channels)):
-            loc.append(nn.Conv2d(in_channels[i], num_defaults[i] * 4, kernel_size=1))
-            conf.append(nn.Conv2d(in_channels[i], num_defaults[i] * num_classes, kernel_size=1))
+            loc_layers.append(nn.Conv2d(in_channels[i], num_defaults[i] * 4, kernel_size=1))
+            conf_layers.append(nn.Conv2d(in_channels[i], num_defaults[i] * num_classes, kernel_size=1))
 
-        self.loc_layers = nn.ModuleList(loc)
-        self.conf_layers = nn.ModuleList(conf)
+        self.loc_layers = loc_layers
+        self.conf_layers = conf_layers
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -38,7 +38,7 @@ class MultiBox(torch.jit.ScriptModule):
         #"""
         i = 0
         for loc_layer in self.loc_layers:
-            loc = loc_layer(input[i])
+            loc = loc_layer(input[i + 1])
             # (N x C x H x W) -> (N x H x W x C)
             loc = loc.permute(0, 2, 3, 1).contiguous()
             loc = loc.view(loc.size(0), -1, 4)
@@ -47,7 +47,7 @@ class MultiBox(torch.jit.ScriptModule):
 
         i = 0
         for conf_layer in self.conf_layers:
-            conf = conf_layer(input[i])
+            conf = conf_layer(input[i + 1])
             # (N x C x H x W) -> (N x H x W x C)
             conf = conf.permute(0, 2, 3, 1).contiguous()
             conf = conf.view(conf.size(0), -1, self.num_classes)
@@ -55,8 +55,9 @@ class MultiBox(torch.jit.ScriptModule):
             i += 1
 
         """
+        # feature maps: 4e, 5b, 6b, 7b
         i = 0
-        for layer in input:
+        for layer in input[1:]:
             loc = self.loc_layers[i](layer)
             # (N x C x H x W) -> (N x H x W x C)
             loc = loc.permute(0, 2, 3, 1).contiguous()
@@ -80,3 +81,4 @@ class MultiBox(torch.jit.ScriptModule):
 if __name__ == '__main__':
     box = MultiBox(11)
     print(box.code)
+

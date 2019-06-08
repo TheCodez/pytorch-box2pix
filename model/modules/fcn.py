@@ -1,5 +1,3 @@
-from typing import Dict
-
 import torch
 import torch.nn as nn
 
@@ -31,18 +29,18 @@ class FCNHead(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, size, outputs):
-        # type: (List[int], Dict[str, Tensor]) -> Tensor
+        # type: (List[int], List[Tensor]) -> Tensor
 
-        score6b = self.score6b(outputs['inception6b'])
-        score5b = self.score5b(outputs['inception5b'])
+        score6b = self.score6b(outputs[3])
+        score5b = self.score5b(outputs[2])
         output = self.upscore(score6b)
         output = output[:, :, 1:1 + score5b.size(2), 1:1 + score5b.size(3)]
         output += score5b
-        score4e = self.score4e(outputs['inception4e'])
+        score4e = self.score4e(outputs[1])
         output = self.upscore2(output)
         output = output[:, :, 1:1 + score4e.size(2), 1:1 + score4e.size(3)]
         output += score4e
-        score3b = self.score3b(outputs['inception3b'])
+        score3b = self.score3b(outputs[0])
         output = self.upscore4(output)
         output = output[:, :, 1:1 + score3b.size(2), 1:1 + score3b.size(3)]
         output += score3b
