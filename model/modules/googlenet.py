@@ -1,12 +1,12 @@
-from typing import Dict
+from typing import List
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torchvision import models
+from torchvision.models.googlenet import BasicConv2d, Inception
 
 
-class GoogLeNet(torch.jit.ScriptModule):
+class GoogLeNet(nn.Module):
     """A GoogLeNet feature extractor for FCN and SSD.
     """
 
@@ -47,7 +47,6 @@ class GoogLeNet(torch.jit.ScriptModule):
         googlenet = models.googlenet(pretrained=True)
         self.load_state_dict(googlenet.state_dict(), strict=False)
 
-    @torch.jit.script_method
     def _transform_input(self, x):
         x_ch0 = torch.unsqueeze(x[:, 0], 1) * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
         x_ch1 = torch.unsqueeze(x[:, 1], 1) * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
@@ -55,9 +54,8 @@ class GoogLeNet(torch.jit.ScriptModule):
 
         return torch.cat([x_ch0, x_ch1, x_ch2], 1)
 
-    @torch.jit.script_method
     def forward(self, x):
-        # type: (Tensor) -> List[Tensor]
+        # type: (torch.Tensor) -> List[torch.Tensor]
         feature_maps = []
 
         x = self._transform_input(x)
@@ -85,55 +83,7 @@ class GoogLeNet(torch.jit.ScriptModule):
         return feature_maps
 
 
-class Inception(torch.jit.ScriptModule):
-    __constants__ = ['branch2', 'branch3', 'branch4']
-
-    def __init__(self, in_channels, ch1x1, ch3x3red, ch3x3, ch5x5red, ch5x5, pool_proj):
-        super(Inception, self).__init__()
-
-        self.branch1 = BasicConv2d(in_channels, ch1x1, kernel_size=1)
-
-        self.branch2 = nn.Sequential(
-            BasicConv2d(in_channels, ch3x3red, kernel_size=1),
-            BasicConv2d(ch3x3red, ch3x3, kernel_size=3, padding=1)
-        )
-
-        self.branch3 = nn.Sequential(
-            BasicConv2d(in_channels, ch5x5red, kernel_size=1),
-            BasicConv2d(ch5x5red, ch5x5, kernel_size=3, padding=1)
-        )
-
-        self.branch4 = nn.Sequential(
-            nn.MaxPool2d(kernel_size=3, stride=1, padding=1, ceil_mode=True),
-            BasicConv2d(in_channels, pool_proj, kernel_size=1)
-        )
-
-    @torch.jit.script_method
-    def forward(self, x):
-        branch1 = self.branch1(x)
-        branch2 = self.branch2(x)
-        branch3 = self.branch3(x)
-        branch4 = self.branch4(x)
-
-        outputs = [branch1, branch2, branch3, branch4]
-        return torch.cat(outputs, 1)
-
-
-class BasicConv2d(torch.jit.ScriptModule):
-
-    def __init__(self, in_channels, out_channels, **kwargs):
-        super(BasicConv2d, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
-        self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
-
-    @torch.jit.script_method
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.bn(x)
-        return F.relu(x, inplace=True)
-
-
-class Inception2(torch.jit.ScriptModule):
+class Inception2(nn.Module):
     """A replacement for the default Inception module which follows the GoogLeNet paper
     by having one branch with 5x5 convolutions. The default inception module, which was ported from TensorFlow
     uses 3x3 convolutions instead for some reason. Using this might improve performance as the new inceptions
@@ -166,18 +116,12 @@ class Inception2(torch.jit.ScriptModule):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    @torch.jit.script_method
     def forward(self, x):
         branch1 = self.branch1(x)
-        print('branch1: ', branch1.size())
         branch2 = self.branch2(x)
-        print('branch2: ', branch2.size())
         branch3 = self.branch3(x)
-        print('branch3: ', branch3.size())
         branch4 = self.branch4(x)
-        print('branch4: ', branch4.size())
 
         outputs = [branch1, branch2, branch3, branch4]
         out = torch.cat(outputs, 1)
-        print('out: ', out.size())
         return out

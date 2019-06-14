@@ -12,7 +12,7 @@ def box2pix(num_classes=11, pretrained=False, init_googlenet=False):
     return model
 
 
-class Box2Pix(torch.jit.ScriptModule):
+class Box2Pix(nn.Module):
     """
         Implementation of Box2Pix: Single-Shot Instance Segmentation by Assigning Pixels to Object Boxes
             <https://lmb.informatik.uni-freiburg.de/Publications/2018/UB18>
@@ -35,7 +35,6 @@ class Box2Pix(torch.jit.ScriptModule):
         self.semantics = FCNHead(num_classes)
         self.multibox = MultiBox(num_classes)
 
-    @torch.jit.script_method
     def forward(self, x):
         size = x.size()
 

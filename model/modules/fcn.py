@@ -1,10 +1,12 @@
+from typing import List
+
 import torch
 import torch.nn as nn
 
 from utils import get_upsampling_weight
 
 
-class FCNHead(torch.jit.ScriptModule):
+class FCNHead(nn.Module):
 
     def __init__(self, num_channels):
         super(FCNHead, self).__init__()
@@ -27,9 +29,8 @@ class FCNHead(torch.jit.ScriptModule):
                 with torch.no_grad():
                     m.weight.copy_(upsampling_weight)
 
-    @torch.jit.script_method
     def forward(self, size, outputs):
-        # type: (List[int], List[Tensor]) -> Tensor
+        # type: (List[int], List[torch.Tensor]) -> torch.Tensor
 
         score6b = self.score6b(outputs[3])
         score5b = self.score5b(outputs[2])
