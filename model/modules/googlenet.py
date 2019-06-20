@@ -90,8 +90,6 @@ class Inception2(nn.Module):
     blocks would have been trained from scratch anyways.
     """
 
-    __constants__ = ['branch2', 'branch3', 'branch4']
-
     def __init__(self, in_channels, ch1x1, ch3x3red, ch3x3, ch5x5red, ch5x5, pool_proj):
         super(Inception2, self).__init__()
 

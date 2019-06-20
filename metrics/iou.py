@@ -1,41 +1,48 @@
-import numpy as np
+import torch
+from ignite.exceptions import NotComputableError
 from ignite.metrics import Metric
 
 
-class IntersectionOverUnion(Metric):
-    """Computes the intersection over union (IoU) per class.
-
-        based on: https://github.com/wkentaro/pytorch-fcn/blob/master/torchfcn/utils.py
-
-        - `update` must receive output of the form `(y_pred, y)`.
-    """
-
-    def __init__(self, num_classes=10, ignore_index=255, output_transform=lambda x: x):
+class ConfusionMatrix(Metric):
+    def __init__(self, num_classes, output_transform=lambda x: x):
+        self._num_examples = 0
         self.num_classes = num_classes
-        self.ignore_index = ignore_index
-        self.confusion_matrix = np.zeros((num_classes, num_classes))
-
-        super(IntersectionOverUnion, self).__init__(output_transform=output_transform)
-
-    def _fast_hist(self, label_true, label_pred):
-        # mask = (label_true >= 0) & (label_true < self.num_classes)
-        mask = label_true != self.ignore_index
-        hist = np.bincount(self.num_classes * label_true[mask].astype(np.int) + label_pred[mask],
-                           minlength=self.num_classes ** 2).reshape(self.num_classes, self.num_classes)
-        return hist
-
-    def reset(self):
-        self.confusion_matrix = np.zeros((self.num_classes, self.num_classes))
+        self.confusion_matrix = None
+        super(ConfusionMatrix, self).__init__(output_transform=output_transform)
 
     def update(self, output):
         y_pred, y = output
 
-        for label_true, label_pred in zip(y.numpy(), y_pred.numpy()):
-            self.confusion_matrix += self._fast_hist(label_true.flatten(), label_pred.flatten())
+        y_pred = y_pred.argmax(1).flatten()
+        y = y.flatten()
+
+        n = self.num_classes
+        if self.confusion_matrix is None:
+            self.confusion_matrix = torch.zeros((n, n), dtype=torch.int64, device=y.device)
+
+        with torch.no_grad():
+            k = (y >= 0) & (y < n)
+            inds = n * y[k].to(torch.int64) + y_pred[k]
+            self.confusion_matrix += torch.bincount(inds, minlength=n ** 2).reshape(n, n)
+            self._num_examples += y_pred.shape[0]
+
+    def reset(self):
+        if self.confusion_matrix is not None:
+            self.confusion_matrix.zero_()
+        self._num_examples = 0
 
     def compute(self):
-        hist = self.confusion_matrix
-        with np.errstate(divide='ignore', invalid='ignore'):
-            iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
+        if self._num_examples == 0:
+            raise NotComputableError('Confusion matrix must have at least one example before it can be computed.')
+        return self.confusion_matrix.cpu()
 
-        return np.nanmean(iu)
+
+def IoU(cm):
+    # Increase floating point precision
+    cm = cm.type(torch.float64)
+    iou = cm.diag() / (cm.sum(dim=1) + cm.sum(dim=0) - cm.diag() + 1e-15)
+    return iou
+
+
+def mIoU(cm):
+    return IoU(cm=cm).mean()

@@ -8,7 +8,6 @@ class BoxLoss(nn.Module):
     def __init__(self, num_classes=11, gamma=2, reduction='none'):
         super(BoxLoss, self).__init__()
         self.num_classes = num_classes
-        self.reduction = reduction
         self.focal_loss = FocalLoss(gamma, reduction=reduction)
         self.l2_loss = nn.MSELoss(reduction=reduction)
 

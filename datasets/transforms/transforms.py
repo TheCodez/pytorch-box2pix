@@ -2,9 +2,11 @@ import random
 
 import numpy as np
 import torch
+import torchvision.transforms as T
 import torchvision.transforms.functional as F
-from PIL import Image
-from skimage.filters import gaussian
+from PIL import Image, ImageFilter
+
+from datasets import CityscapesDataset
 
 
 class Compose(object):
@@ -20,9 +22,17 @@ class Compose(object):
 class ToTensor(object):
     def __call__(self, img, inst, boxes, labels):
         img = F.to_tensor(img)
-        inst = F.to_tensor(inst).long()
+        inst = torch.as_tensor(np.asarray(inst), dtype=torch.int64)
 
         return img, inst, boxes, labels
+
+
+class ConvertIdToTrainId(object):
+
+    def __call__(self, img, inst):
+        inst = CityscapesDataset.convert_id_to_train_id(inst)
+
+        return img, inst
 
 
 class Resize(object):
@@ -50,6 +60,32 @@ class Resize(object):
         return boxes
 
 
+class Rescale(object):
+    def __init__(self, scale):
+        self.scale = scale
+
+    def __call__(self, img, inst, boxes, labels):
+        width, height = img.size
+        width *= self.scale
+        height *= self.scale
+
+        new_size = (int(height), int(width))
+        img = F.resize(img, new_size, interpolation=Image.BILINEAR)
+        inst = F.resize(inst, new_size, interpolation=Image.NEAREST)
+        boxes = self._resize_boxes(boxes)
+
+        return img, inst, boxes, labels
+
+    def _resize_boxes(self, boxes):
+        boxes = boxes.clone()
+        boxes[:, 0] *= self.scale
+        boxes[:, 1] *= self.scale
+        boxes[:, 2] *= self.scale
+        boxes[:, 3] *= self.scale
+
+        return boxes
+
+
 class RandomHorizontalFlip(object):
     def __init__(self, p=0.5):
         self.p = p
@@ -71,38 +107,34 @@ class RandomHorizontalFlip(object):
         return boxes
 
 
-class RandomGaussionBlur(object):
-    def __init__(self, sigma=(0.15, 1.15)):
-        self.sigma = sigma
-
-    def __call__(self, img, inst, boxes, labels):
-        sigma = self.sigma[0] + random.random() * self.sigma[1]
-        blurred_img = gaussian(np.array(img), sigma=sigma, multichannel=True)
-        blurred_img *= 255
-        img = Image.fromarray(blurred_img.astype(np.uint8))
-
-        return img, inst, boxes, labels
-
-
-class RandomScale(object):
-    def __init__(self, scale=1.0):
-        self.scale = scale
-
-    def __call__(self, img, inst, boxes, labels):
-        scale = random.uniform(1.0, self.scale)
-
-        img = F.affine(img, 0, (0, 0), scale, 0)
-        inst = F.affine(inst, 0, (0, 0), scale, 0)
-
-        return img, inst, boxes, labels
-
-
 class ColorJitter(object):
     def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
-        from torchvision import transforms
-        self.transform = transforms.ColorJitter(brightness, contrast, saturation, hue)
+        self.transform = T.ColorJitter(brightness, contrast, saturation, hue)
+
+    def __call__(self, img, target):
+        img = self.transform(img)
+
+        return img, target
+
+
+class RandomGaussionBlur(object):
+    def __init__(self, p=0.5, radius=0.8):
+        self.p = p
+        self.radius = radius
 
     def __call__(self, img, inst, boxes, labels):
-        img = self.transform(img)
+        if random.random() < self.p:
+            img = img.filter(ImageFilter.GaussianBlur(radius=self.radius))
+
+        return img, inst, boxes, labels
+
+
+class Normalize(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, img, inst, boxes, labels):
+        img = F.normalize(img, mean=self.mean, std=self.std)
 
         return img, inst, boxes, labels

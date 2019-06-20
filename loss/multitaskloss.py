@@ -6,10 +6,10 @@ class MultiTaskLoss(nn.Module):
     def __init__(self):
         super(MultiTaskLoss, self).__init__()
 
-        self.uncert_semantics = nn.Parameter(torch.zeros(1, requires_grad=True))
-        self.uncert_offsets = nn.Parameter(torch.zeros(1, requires_grad=True))
-        self.uncert_ssdbox = nn.Parameter(torch.zeros(1, requires_grad=True))
-        self.uncert_ssdclass = nn.Parameter(torch.zeros(1, requires_grad=True))
+        self.uncert_semantics = nn.Parameter(torch.zeros(1))
+        self.uncert_offsets = nn.Parameter(torch.zeros(1))
+        self.uncert_ssdbox = nn.Parameter(torch.zeros(1))
+        self.uncert_ssdclass = nn.Parameter(torch.zeros(1))
 
     def forward(self, semantics_loss, offsets_loss, box_loss, conf_loss):
         loss1 = 0.5 * torch.exp(-self.uncert_semantics) * semantics_loss + self.uncert_semantics

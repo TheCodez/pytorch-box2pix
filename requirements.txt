@@ -1,3 +1,6 @@
+Pillow
+numpy
+tensorboardX
 torch
 torchvision
 pytorch-ignite

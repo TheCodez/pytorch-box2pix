@@ -30,8 +30,7 @@ class MultiBox(nn.Module):
         confs = []
 
         # feature maps: [4e, 5b, 6b, 7b]
-        i = 0
-        for layer in input[1:]:
+        for i, layer in enumerate(input[1:]):
             loc = self.loc_layers[i](layer)
             # (N x C x H x W) -> (N x H x W x C)
             loc = loc.permute(0, 2, 3, 1).contiguous()
@@ -43,7 +42,6 @@ class MultiBox(nn.Module):
             conf = conf.permute(0, 2, 3, 1).contiguous()
             conf = conf.view(conf.size(0), -1, self.num_classes)
             confs.append(conf)
-            i += 1
 
         loc_preds = torch.cat(locs, 1)
         conf_preds = torch.cat(confs, 1)
