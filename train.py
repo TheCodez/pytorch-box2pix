@@ -202,8 +202,7 @@ def run(args):
 
     @evaluator.on(Events.EPOCH_COMPLETED)
     def save_checkpoint(engine):
-        iou = engine.state.metrics['IoU'] * 100.0
-        mean_iou = iou.mean()
+        mean_iou = engine.state.metrics['mIoU'] * 100.0
 
         name = 'epoch{}_mIoU={:.1f}.pth'.format(trainer.state.epoch, mean_iou)
         file = {'model': model.state_dict(), 'epoch': trainer.state.epoch, 'iteration': engine.state.iteration,
