@@ -111,10 +111,10 @@ class ColorJitter(object):
     def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
         self.transform = T.ColorJitter(brightness, contrast, saturation, hue)
 
-    def __call__(self, img, target):
+    def __call__(self, img, inst, boxes, labels):
         img = self.transform(img)
 
-        return img, target
+        return img, inst, boxes, labels
 
 
 class RandomGaussionBlur(object):
