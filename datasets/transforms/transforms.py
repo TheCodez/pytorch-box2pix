@@ -23,16 +23,17 @@ class ToTensor(object):
     def __call__(self, img, inst, boxes, labels):
         img = F.to_tensor(img)
         inst = torch.as_tensor(np.asarray(inst), dtype=torch.int64)
+        #boxes = torch.as_tensor(boxes)
 
         return img, inst, boxes, labels
 
 
 class ConvertIdToTrainId(object):
 
-    def __call__(self, img, inst):
+    def __call__(self, img, inst, boxes, labels):
         inst = CityscapesDataset.convert_id_to_train_id(inst)
 
-        return img, inst
+        return img, inst, boxes, labels
 
 
 class Resize(object):

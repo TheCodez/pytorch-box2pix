@@ -14,7 +14,6 @@ def get_bounding_box(polygon):
     return xmin, ymin, xmax, ymax
 
 
-@torch.jit.script
 def d_change(prior, ground_truth):
     """Compute a change based metric of two sets of boxes.
 
@@ -35,7 +34,6 @@ def d_change(prior, ground_truth):
                       + (torch.pow(ybr, 2) / hgt) + (torch.pow(xbr, 2) / wgt))
 
 
-@torch.jit.script
 def corner_to_center_form(boxes):
     """Convert bounding boxes from (xmin, ymin, xmax, ymax) to (cx, cy, width, height)
 
@@ -47,7 +45,6 @@ def corner_to_center_form(boxes):
                       boxes[:, 2:] - boxes[:, :2]], dim=1)
 
 
-@torch.jit.script
 def center_to_corner_form(boxes):
     """Convert bounding boxes from (cx, cy, width, height) to (xmin, ymin, xmax, ymax)
 
@@ -59,7 +56,6 @@ def center_to_corner_form(boxes):
                       boxes[:, 2:] + (boxes[:, :2] / 2)], dim=1)
 
 
-@torch.jit.script
 def resize_boxes(boxes, image):
     """Resize normalized boxes back to the original image size
 

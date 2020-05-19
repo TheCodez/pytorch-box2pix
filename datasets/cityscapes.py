@@ -7,10 +7,10 @@ from utils.box_utils import get_bounding_box
 
 class CityscapesDataset(datasets.Cityscapes):
 
-    def __init__(self, root, split='train', transforms=None):
+    def __init__(self, root, split='train', joint_transform=None):
         super(CityscapesDataset, self).__init__(root, split, target_type=['instance', 'polygon'])
 
-        self.my_transforms = transforms
+        self.joint_transform = joint_transform
 
     def __getitem__(self, index):
         image, target = super(CityscapesDataset, self).__getitem__(index)
@@ -19,10 +19,10 @@ class CityscapesDataset(datasets.Cityscapes):
         boxes, labels = self._create_boxes(json)
         boxes = self._normalize_boxes(image, boxes)
 
-        if self.my_transforms:
-            image, instance, boxes, labels = self.my_transforms(image, instance, boxes, labels)
+        if self.joint_transform:
+            image, instance, boxes, labels = self.joint_transform(image, instance, boxes, labels)
 
-        instance = self.convert_id_to_train_id(instance)
+        #instance = self.convert_id_to_train_id(instance)
         centroids = self._create_offsets(instance)
 
         return image, instance, centroids, boxes, labels

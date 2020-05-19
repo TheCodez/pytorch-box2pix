@@ -26,8 +26,11 @@ from utils.box_coder import BoxCoder
 from utils.helper import save
 
 
+def custom_collate_fn(batch):
+    return tuple(zip(*batch))
+
 def get_data_loaders(data_dir, batch_size, num_workers):
-    normalize = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
@@ -43,11 +46,13 @@ def get_data_loaders(data_dir, batch_size, num_workers):
         normalize
     ])
 
-    train_loader = DataLoader(CityscapesDataset(root=data_dir, split='train', transforms=transform),
-                              batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
+    train_loader = DataLoader(CityscapesDataset(root=data_dir, split='train', joint_transform=transform),
+                              batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True,
+                              collate_fn=custom_collate_fn)
 
-    val_loader = DataLoader(CityscapesDataset(root=data_dir, split='val', transforms=val_transform),
-                            batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    val_loader = DataLoader(CityscapesDataset(root=data_dir, split='val', joint_transform=val_transform),
+                            batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True,
+                            collate_fn=custom_collate_fn)
 
     return train_loader, val_loader
 
@@ -105,6 +110,9 @@ def run(args):
         model.train()
         optimizer.zero_grad()
         image, instance, centroids, boxes, labels = _prepare_batch(batch)
+
+        print(type(boxes))
+
         boxes, labels = box_coder.encode(boxes, labels)
 
         loc_preds, conf_preds, semantics_pred, offsets_pred = model(image)
