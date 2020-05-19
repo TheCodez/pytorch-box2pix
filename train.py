@@ -213,6 +213,7 @@ def run(args):
 
     @trainer.on(Events.EPOCH_COMPLETED)
     def log_validation_results(engine):
+        pbar.log_message("Start Validation - Epoch: [{}/{}]".format(engine.state.epoch, engine.state.max_epochs))
         evaluator.run(val_loader)
         metrics = evaluator.state.metrics
         loss = metrics['loss']

@@ -1,2 +1,2 @@
 from .cityscapes import *
-from .kitti import *
+#from .kitti import *

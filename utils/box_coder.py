@@ -5,7 +5,6 @@ import torch
 from utils import box_utils
 
 
-@torch.jit.script
 class FeatureMapDef(object):
     def __init__(self, width, height, receptive_size):
         # type: (int, int, int) -> None
@@ -14,7 +13,6 @@ class FeatureMapDef(object):
         self.receptive_size = receptive_size
 
 
-@torch.jit.script
 class BoxCoder(object):
     """
         References:

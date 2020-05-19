@@ -1,5 +1,6 @@
 import torch
 import torchvision.datasets as datasets
+import torchvision.transforms.functional as F
 
 from utils.box_utils import get_bounding_box
 
@@ -9,18 +10,19 @@ class CityscapesDataset(datasets.Cityscapes):
     def __init__(self, root, split='train', transforms=None):
         super(CityscapesDataset, self).__init__(root, split, target_type=['instance', 'polygon'])
 
-        self.transforms = transforms
+        self.my_transforms = transforms
 
     def __getitem__(self, index):
         image, target = super(CityscapesDataset, self).__getitem__(index)
         instance, json = target
 
-        instance = self.convert_id_to_train_id(instance)
         boxes, labels = self._create_boxes(json)
         boxes = self._normalize_boxes(image, boxes)
 
-        if self.transforms:
-            image, instance, boxes, labels = self.transforms(image, instance, boxes, labels)
+        if self.my_transforms:
+            image, instance, boxes, labels = self.my_transforms(image, instance, boxes, labels)
+
+        instance = self.convert_id_to_train_id(instance)
 
         return image, instance, boxes, labels
 
@@ -54,6 +56,21 @@ class CityscapesDataset(datasets.Cityscapes):
                 labels.append(cls.id)
 
         return torch.as_tensor(boxes, dtype=torch.float32), torch.as_tensor(labels, dtype=torch.int64)
+
+    def _create_offsets(self, inst):
+        offsets = torch.zeros((2, inst.shape[0], inst.shape[1]))
+
+        instance_ids = torch.unique(inst)
+        instance_ids = instance_ids[instance_ids > 1000]
+
+        for instance_id in instance_ids:
+            mask = (inst == instance_id)
+            instance_positions = torch.nonzero(mask, as_tuple=False).float().t()
+
+            center_of_mass = instance_positions.mean(dim=1).reshape(2, 1)
+            offsets[:, mask] = center_of_mass - instance_positions
+
+        return offsets
 
     def _normalize_boxes(self, img, boxes):
         width, height = img.size

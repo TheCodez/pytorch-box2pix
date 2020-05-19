@@ -7,8 +7,8 @@ class MeanAveragePrecision(Metric):
     def __init__(self, num_classes=20, iou_threshold=0.5, output_transform=lambda x: x):
         super(MeanAveragePrecision, self).__init__(output_transform=output_transform)
 
-        self.num_classes = num_classes
-        self.iou_threshold = iou_threshold
+        self._num_classes = num_classes
+        self._iou_threshold = iou_threshold
 
     def reset(self):
         self._true_boxes = torch.tensor([], dtype=torch.float32)
@@ -40,8 +40,8 @@ class MeanAveragePrecision(Metric):
             det_images.extend([i] * self._det_labels[i].size(0))
         det_images = torch.LongTensor(det_images)
 
-        average_precisions = torch.zeros((self.num_classes - 1), dtype=torch.float)
-        for c in range(1, self.num_classes):
+        average_precisions = torch.zeros((self._num_classes - 1), dtype=torch.float)
+        for c in range(1, self._num_classes):
             true_class_images = true_images[self._true_labels == c]
             true_class_boxes = self._true_boxes[self._true_labels == c]
 
@@ -74,7 +74,7 @@ class MeanAveragePrecision(Metric):
 
                 original_ind = torch.LongTensor(range(true_class_boxes.size(0)))[true_class_images == this_image][ind]
 
-                if max_overlap.item() > self.iou_threshold:
+                if max_overlap.item() > self._iou_threshold:
                     if true_class_boxes_detected[original_ind] == 0:
                         true_positives[d] = 1
                         true_class_boxes_detected[
@@ -88,7 +88,7 @@ class MeanAveragePrecision(Metric):
             cumul_false_positives = torch.cumsum(false_positives, dim=0)
             cumul_precision = cumul_true_positives / (
                     cumul_true_positives + cumul_false_positives + 1e-10)
-            cumul_recall = cumul_true_positives / self.num_classes
+            cumul_recall = cumul_true_positives / self._num_classes
 
             recall_thresholds = torch.arange(start=0, end=1.1, step=.1).tolist()
             precisions = torch.zeros((len(recall_thresholds)), dtype=torch.float)
