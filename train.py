@@ -93,23 +93,24 @@ def run(args):
             print("No checkpoint found at '{}'".format(args.resume))
 
     def _prepare_batch(batch, non_blocking=True):
-        image, instance, boxes, labels = batch
+        image, instance, centroids, boxes, labels = batch
 
         return (convert_tensor(image, device=device, non_blocking=non_blocking),
                 convert_tensor(instance, device=device, non_blocking=non_blocking),
+                convert_tensor(centroids, device=device, non_blocking=non_blocking),
                 convert_tensor(boxes, device=device, non_blocking=non_blocking),
                 convert_tensor(labels, device=device, non_blocking=non_blocking))
 
     def _update(engine, batch):
         model.train()
         optimizer.zero_grad()
-        image, instance, boxes, labels = _prepare_batch(batch)
+        image, instance, centroids, boxes, labels = _prepare_batch(batch)
         boxes, labels = box_coder.encode(boxes, labels)
 
         loc_preds, conf_preds, semantics_pred, offsets_pred = model(image)
 
         semantics_loss = semantics_criterion(semantics_pred, instance)
-        offsets_loss = offsets_criterion(offsets_pred, instance)
+        offsets_loss = offsets_criterion(offsets_pred, centroids)
         box_loss, conf_loss = box_criterion(loc_preds, boxes, conf_preds, labels)
 
         loss = multitask_criterion(semantics_loss, offsets_loss, box_loss, conf_loss)

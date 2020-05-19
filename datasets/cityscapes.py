@@ -23,8 +23,9 @@ class CityscapesDataset(datasets.Cityscapes):
             image, instance, boxes, labels = self.my_transforms(image, instance, boxes, labels)
 
         instance = self.convert_id_to_train_id(instance)
+        centroids = self._create_offsets(instance)
 
-        return image, instance, boxes, labels
+        return image, instance, centroids, boxes, labels
 
     @staticmethod
     def convert_id_to_train_id(target):
