@@ -29,6 +29,24 @@ from utils.helper import save
 def custom_collate_fn(batch):
     return tuple(zip(*batch))
 
+
+def detection_collate(batch):
+    imgs = []
+    inst = []
+    centroids = []
+    boxes = []
+    labels = []
+
+    for sample in batch:
+        imgs.append(sample[0])
+        inst.append(sample[1])
+        centroids.append(sample[2])
+        boxes.append(torch.FloatTensor(sample[3]))
+        labels.append(torch.LongTensor(sample[4]))
+
+    return torch.stack(imgs, 0), torch.stack(inst, 0), torch.stack(centroids, 0), boxes, labels
+
+
 def get_data_loaders(data_dir, batch_size, num_workers):
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
@@ -48,11 +66,11 @@ def get_data_loaders(data_dir, batch_size, num_workers):
 
     train_loader = DataLoader(CityscapesDataset(root=data_dir, split='train', joint_transform=transform),
                               batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True,
-                              collate_fn=custom_collate_fn)
+                              collate_fn=detection_collate)
 
     val_loader = DataLoader(CityscapesDataset(root=data_dir, split='val', joint_transform=val_transform),
                             batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True,
-                            collate_fn=custom_collate_fn)
+                            collate_fn=detection_collate)
 
     return train_loader, val_loader
 
@@ -113,7 +131,7 @@ def run(args):
 
         print(type(boxes))
 
-        boxes, labels = box_coder.encode(boxes, labels)
+        #boxes, labels = box_coder.encode(boxes, labels)
 
         loc_preds, conf_preds, semantics_pred, offsets_pred = model(image)
 
@@ -239,7 +257,7 @@ def run(args):
 
 if __name__ == '__main__':
     parser = ArgumentParser('Box2Pix with PyTorch')
-    parser.add_argument('--batch-size', type=int, default=4,
+    parser.add_argument('--batch-size', type=int, default=1,
                         help='input batch size for training')
     parser.add_argument('--num-workers', type=int, default=4,
                         help='number of workers')

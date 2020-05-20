@@ -3,6 +3,7 @@ import torchvision.datasets as datasets
 import torchvision.transforms.functional as F
 
 from utils.box_utils import get_bounding_box
+from utils.box_coder import BoxCoder
 
 
 class CityscapesDataset(datasets.Cityscapes):
@@ -11,6 +12,7 @@ class CityscapesDataset(datasets.Cityscapes):
         super(CityscapesDataset, self).__init__(root, split, target_type=['instance', 'polygon'])
 
         self.joint_transform = joint_transform
+        self.box_coder = BoxCoder()
 
     def __getitem__(self, index):
         image, target = super(CityscapesDataset, self).__getitem__(index)
@@ -24,6 +26,7 @@ class CityscapesDataset(datasets.Cityscapes):
 
         #instance = self.convert_id_to_train_id(instance)
         centroids = self._create_offsets(instance)
+        boxes, labels = self.box_coder.encode(boxes, labels)
 
         return image, instance, centroids, boxes, labels
 
@@ -56,7 +59,7 @@ class CityscapesDataset(datasets.Cityscapes):
                 boxes.append(get_bounding_box(polygons))
                 labels.append(cls.id)
 
-        return torch.as_tensor(boxes, dtype=torch.float32), torch.as_tensor(labels, dtype=torch.int64)
+        return torch.tensor(boxes, dtype=torch.float32), torch.tensor(labels, dtype=torch.int64)
 
     def _create_offsets(self, inst):
         offsets = torch.zeros((2, inst.shape[0], inst.shape[1]))

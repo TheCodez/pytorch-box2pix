@@ -14,7 +14,40 @@ def get_bounding_box(polygon):
     return xmin, ymin, xmax, ymax
 
 
-def d_change(prior, ground_truth):
+def my_iou(box1, box2):
+    '''Compute the intersection over union of two set of boxes, each box is [x1,y1,x2,y2].
+    Args:
+      box1: (tensor) bounding boxes, sized [N,4].
+      box2: (tensor) bounding boxes, sized [M,4].
+    Return:
+      (tensor) iou, sized [N,M].
+    '''
+    N = box1.size(0)
+    M = box2.size(0)
+
+    lt = torch.max(
+        box1[:, :2].unsqueeze(1).expand(N, M, 2),  # [N,2] -> [N,1,2] -> [N,M,2]
+        box2[:, :2].unsqueeze(0).expand(N, M, 2),  # [M,2] -> [1,M,2] -> [N,M,2]
+    )
+
+    rb = torch.min(
+        box1[:, 2:].unsqueeze(1).expand(N, M, 2),  # [N,2] -> [N,1,2] -> [N,M,2]
+        box2[:, 2:].unsqueeze(0).expand(N, M, 2),  # [M,2] -> [1,M,2] -> [N,M,2]
+    )
+
+    wh = rb - lt  # [N,M,2]
+    wh[wh < 0] = 0  # clip at 0
+    inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+
+    area1 = (box1[:, 2] - box1[:, 0]) * (box1[:, 3] - box1[:, 1])  # [N,]
+    area2 = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])  # [M,]
+    area1 = area1.unsqueeze(1).expand_as(inter)  # [N,] -> [N,1] -> [N,M]
+    area2 = area2.unsqueeze(0).expand_as(inter)  # [M,] -> [1,M] -> [N,M]
+
+    iou = inter / (area1 + area2 - inter)
+    return iou
+
+def __d_change(prior, ground_truth):
     """Compute a change based metric of two sets of boxes.
 
     Args:
@@ -33,6 +66,32 @@ def d_change(prior, ground_truth):
     return torch.sqrt((torch.pow(ytl, 2) / hgt) + (torch.pow(xtl, 2) / wgt)
                       + (torch.pow(ybr, 2) / hgt) + (torch.pow(xbr, 2) / wgt))
 
+
+def d_change(priors, gt):
+    """
+    Compute the d_change metric proposed in Box2Pix:
+    https://lmb.informatik.uni-freiburg.de/Publications/2018/UB18/paper-box2pix.pdf
+
+    Input should be in point form (xmin, ymin, xmax, ymax).
+    Output is of shape [num_gt, num_priors]
+    Note this returns -change so it can be a drop in replacement for
+    """
+    num_priors = priors.size(0)
+    num_gt = gt.size(0)
+
+    gt_w = (gt[:, 2] - gt[:, 0])[:, None].expand(num_gt, num_priors)
+    gt_h = (gt[:, 3] - gt[:, 1])[:, None].expand(num_gt, num_priors)
+
+    gt_mat = gt[:, None, :].expand(num_gt, num_priors, 4)
+    pr_mat = priors[None, :, :].expand(num_gt, num_priors, 4)
+
+    diff = gt_mat - pr_mat
+    diff[:, :, 0] /= gt_w
+    diff[:, :, 2] /= gt_w
+    diff[:, :, 1] /= gt_h
+    diff[:, :, 3] /= gt_h
+
+    return -torch.sqrt((diff ** 2).sum(dim=2))
 
 def corner_to_center_form(boxes):
     """Convert bounding boxes from (xmin, ymin, xmax, ymax) to (cx, cy, width, height)

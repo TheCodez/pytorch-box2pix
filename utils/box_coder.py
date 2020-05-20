@@ -74,7 +74,7 @@ class BoxCoder(object):
         priors = self.priors
         priors = box_utils.center_to_corner_form(priors)
 
-        change = box_utils.d_change(boxes, priors)
+        change = box_utils.my_iou(boxes, priors) #box_utils.d_change(boxes, priors)
 
         change, max_idx = change.max(0)
         max_idx.squeeze_(0)
@@ -89,7 +89,7 @@ class BoxCoder(object):
         loc = torch.cat([loc_xy, loc_wh], 1)
 
         conf = labels[max_idx] + 1  # background class = 0
-        conf[change < change_threshold] = torch.zeros(1)  # 0  # background
+        conf[change < change_threshold] = 0  # background
 
         return loc, conf
 
